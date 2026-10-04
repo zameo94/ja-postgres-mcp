@@ -6,8 +6,9 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
-from ja_pst_mcp.config import DatabaseSettings, Settings, load_settings
+from ja_pst_mcp.config import DatabaseSettings, ServerSettings, Settings, load_settings
 from ja_pst_mcp.context import AppContext
 from ja_pst_mcp.database import Database, DatabaseProtocol
 from ja_pst_mcp.tools import register_tools
@@ -41,6 +42,26 @@ def run_server(server: MCPServer[AppContext], settings: Settings) -> None:
         transport=MCP_TRANSPORT,
         host=settings.server.host,
         port=settings.server.port,
+        transport_security=_transport_security(settings.server),
+    )
+
+
+def _transport_security(
+    settings: ServerSettings,
+) -> TransportSecuritySettings | None:
+    """Return the SDK's DNS-rebinding settings for the configured allowlist.
+
+    With no ``allowed_hosts`` this returns ``None``. For a localhost bind the
+    SDK then enables its own localhost-only protection; for a non-localhost
+    bind, :func:`load_settings` has already rejected the configuration with a
+    ``ConfigurationError``, so the server never starts a non-localhost bind
+    without protection.
+    """
+    if not settings.allowed_hosts:
+        return None
+    return TransportSecuritySettings(
+        allowed_hosts=list(settings.allowed_hosts),
+        allowed_origins=list(settings.allowed_origins),
     )
 
 
