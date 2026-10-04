@@ -47,8 +47,13 @@ application authentication or `/api/...` endpoints — those belong to
 ## Commands
 
 ```
-uv venv
-uv pip install -e ".[dev]"
+# With uv
+uv sync
+uv run pytest
+
+# With Poetry
+poetry install
+poetry run pytest
 
 # Tests (developer-run only; agents must not execute)
 pytest
