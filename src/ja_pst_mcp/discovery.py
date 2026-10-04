@@ -30,11 +30,15 @@ _LIST_SCHEMAS_SQL = (
 
 def build_list_schemas_query(
     allowed_schemas: tuple[str, ...],
-) -> tuple[str, list[str] | None]:
-    """Build the schema-listing SQL and its parameters (allowlist optional)."""
+) -> tuple[str, list[list[str]] | None]:
+    """Build the schema-listing SQL and its parameters (allowlist optional).
+
+    The allowlist is bound as a single PostgreSQL array parameter, hence the
+    nested ``[list(...)]`` (psycopg reads the outer sequence as parameters).
+    """
     query = _LIST_SCHEMAS_SQL
-    params: list[str] | None = None
+    params: list[list[str]] | None = None
     if allowed_schemas:
         query += " AND schema_name = ANY(%s)"
-        params = list(allowed_schemas)
+        params = [list(allowed_schemas)]
     return query + " ORDER BY schema_name", params

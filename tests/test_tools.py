@@ -233,7 +233,7 @@ def test_build_list_schemas_query_is_unparameterized_without_allowlist() -> None
 def test_build_list_schemas_query_parameterizes_allowlist() -> None:
     query, params = build_list_schemas_query(("public", "sales"))
 
-    assert params == ["public", "sales"]
+    assert params == [["public", "sales"]]
     assert "%s" in query
 
 
@@ -307,4 +307,4 @@ async def test_db_list_schemas_passes_allowlist(settings: Settings) -> None:
 
     query, params = created["database"].calls[0]
     assert "= ANY(%s)" in query
-    assert params == ["public"]
+    assert params == [["public"]]

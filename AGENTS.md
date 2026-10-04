@@ -56,6 +56,9 @@ application authentication or `/api/...` endpoints — those belong to
   `pg_toast`) by default; empty allowlist means all non-system schemas.
 - Every pooled connection is `default_transaction_read_only=on`; analysis query
   timeouts are set locally per transaction.
+- The connection pool is configured via `JA_PST_DB_POOL_MIN`,
+  `JA_PST_DB_POOL_MAX` and `JA_PST_DB_POOL_TIMEOUT`; it bounds how many queries
+  run concurrently (each `fetch_rows` checks out its own connection).
 - Analysis queries run through a **server-side cursor** (`DECLARE ... CURSOR`),
   which uses the extended protocol, so **multiple statements are structurally
   impossible** and rows are fetched in batches with bounded client memory.

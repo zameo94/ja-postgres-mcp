@@ -6,6 +6,7 @@ the test session, so these tests always run (Docker is required).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import psycopg
@@ -95,6 +96,20 @@ async def _server_cursor_count(database: Database) -> int:
 async def _transaction_status(database: Database) -> TransactionStatus:
     async with database.connection() as connection:
         return connection.pgconn.transaction_status
+
+
+async def _server_cursor_counts(database: Database, count: int) -> list[int]:
+    async def one() -> int:
+        async with database.connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'"
+                )
+                row = await cursor.fetchone()
+                assert row is not None
+                return row[0]
+
+    return await asyncio.gather(*[one() for _ in range(count)])
 
 
 @pytest.fixture
@@ -208,6 +223,60 @@ async def test_pooled_connection_reuse_has_no_side_effects(database: Database) -
     assert first.rows == ((1,),)
     assert second.rows == ((2,),)
     assert await _transaction_status(database) == TransactionStatus.IDLE
+
+
+async def test_concurrent_queries_are_isolated(db_settings: DatabaseSettings) -> None:
+    database = Database(db_settings, QuerySettings(max_rows=10))
+    await database.open()
+    try:
+        results = await asyncio.gather(
+            *[database.fetch_rows("SELECT %s::int AS n", (i,)) for i in range(8)]
+        )
+    finally:
+        await database.close()
+
+    assert [result.rows for result in results] == [((i,),) for i in range(8)]
+
+
+async def test_concurrent_queries_have_independent_timeouts(
+    db_settings: DatabaseSettings,
+) -> None:
+    slow = Database(db_settings, QuerySettings(statement_timeout_seconds=1))
+    fast = Database(db_settings, QuerySettings(statement_timeout_seconds=10))
+    await slow.open()
+    await fast.open()
+    try:
+        slow_task = asyncio.create_task(slow.fetch_rows("SELECT pg_sleep(3)"))
+        fast_result = await fast.fetch_rows("SELECT 1 AS n")
+        with pytest.raises(DatabaseError):
+            await slow_task
+    finally:
+        await slow.close()
+        await fast.close()
+
+    assert fast_result.rows == ((1,),)
+
+
+async def test_concurrent_queries_leave_pool_clean(
+    db_settings: DatabaseSettings,
+) -> None:
+    database = Database(db_settings, QuerySettings(max_rows=5))
+    await database.open()
+    try:
+        await asyncio.gather(
+            *[
+                database.fetch_rows("SELECT generate_series(1, 50) AS n")
+                for _ in range(6)
+            ]
+        )
+
+        assert await _server_cursor_counts(database, 5) == [0, 0, 0, 0, 0]
+
+        reused = await database.fetch_rows("SELECT 1 AS n")
+        assert reused.rows == ((1,),)
+        assert await _transaction_status(database) == TransactionStatus.IDLE
+    finally:
+        await database.close()
 
 
 async def test_fetch_rows_rejects_multiple_statements(database: Database) -> None:

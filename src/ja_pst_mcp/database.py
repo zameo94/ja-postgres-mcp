@@ -13,8 +13,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from ja_pst_mcp.config import DatabaseSettings, QuerySettings
 
-_POOL_MIN_SIZE = 1
-_POOL_MAX_SIZE = 5
 # Every pooled connection is read-only: the server is read-only by design.
 _READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
 # Prefix for the server-side cursor name (unique per query).
@@ -101,8 +99,9 @@ class Database:
         self._pool = AsyncConnectionPool(
             conninfo="",
             kwargs=build_connection_kwargs(settings),
-            min_size=_POOL_MIN_SIZE,
-            max_size=_POOL_MAX_SIZE,
+            min_size=settings.pool_min_size,
+            max_size=settings.pool_max_size,
+            timeout=settings.pool_timeout_seconds,
             open=False,
         )
 

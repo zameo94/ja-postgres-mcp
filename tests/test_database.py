@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -93,12 +94,14 @@ class FakeAsyncPool:
         kwargs: dict[str, Any],
         min_size: int,
         max_size: int,
+        timeout: float,
         open: bool,
     ) -> None:
         self.conninfo = conninfo
         self.kwargs = kwargs
         self.min_size = min_size
         self.max_size = max_size
+        self.timeout = timeout
         self.auto_open = open
         self.open_calls: list[tuple[bool, float | None]] = []
         self.close_calls = 0
@@ -156,7 +159,21 @@ def test_pool_is_configured_from_settings(pool_spy: PoolSpy) -> None:
     assert pool_spy.pool.kwargs == build_connection_kwargs(SETTINGS)
     assert pool_spy.pool.min_size == 1
     assert pool_spy.pool.max_size == 5
+    assert pool_spy.pool.timeout == 30
     assert pool_spy.pool.auto_open is False
+
+
+def test_pool_sizes_come_from_settings(pool_spy: PoolSpy) -> None:
+    settings = replace(
+        SETTINGS, pool_min_size=2, pool_max_size=9, pool_timeout_seconds=12
+    )
+
+    Database(settings)
+
+    assert pool_spy.pool is not None
+    assert pool_spy.pool.min_size == 2
+    assert pool_spy.pool.max_size == 9
+    assert pool_spy.pool.timeout == 12
 
 
 def test_database_does_not_open_pool_on_construction(pool_spy: PoolSpy) -> None:
