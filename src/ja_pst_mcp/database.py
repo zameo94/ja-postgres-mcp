@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Protocol
 
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
@@ -21,6 +21,16 @@ class DatabaseError(RuntimeError):
 
 class DatabaseConnectionError(DatabaseError):
     """Raised when a database connection cannot be established."""
+
+
+class DatabaseProtocol(Protocol):
+    """Minimal database contract used by the lifespan and tools."""
+
+    async def open(self) -> None: ...
+
+    async def close(self) -> None: ...
+
+    async def ping(self) -> None: ...
 
 
 def build_connection_kwargs(settings: DatabaseSettings) -> dict[str, Any]:

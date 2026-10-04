@@ -3,30 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from mcp.server import MCPServer
 
 from ja_pst_mcp.config import DatabaseSettings, Settings, load_settings
 from ja_pst_mcp.context import AppContext
-from ja_pst_mcp.database import Database
+from ja_pst_mcp.database import Database, DatabaseProtocol
 from ja_pst_mcp.tools import register_tools
 
 SERVER_NAME = "ja-pst-mcp"
 MCP_TRANSPORT = "streamable-http"
 
-DatabaseFactory = Callable[[DatabaseSettings], Database]
+DatabaseFactory = Callable[[DatabaseSettings], DatabaseProtocol]
 
 
 def create_server(
     settings: Settings, *, database_factory: DatabaseFactory = Database
-) -> MCPServer:
+) -> MCPServer[AppContext]:
     """Build the MCP server and register its tools.
 
     The database pool is not opened here; it is opened and closed by the
     lifespan when the server starts and stops.
     """
-    server = MCPServer(
+    server: MCPServer[AppContext] = MCPServer(
         name=SERVER_NAME,
         log_level=settings.log_level,
         lifespan=_make_lifespan(settings, database_factory),
@@ -35,7 +35,7 @@ def create_server(
     return server
 
 
-def run_server(server: MCPServer, settings: Settings) -> None:
+def run_server(server: MCPServer[AppContext], settings: Settings) -> None:
     """Serve the MCP server over Streamable HTTP (blocking)."""
     server.run(
         transport=MCP_TRANSPORT,
@@ -50,9 +50,11 @@ def main() -> None:
     run_server(create_server(settings), settings)
 
 
-def _make_lifespan(settings: Settings, database_factory: DatabaseFactory):
+def _make_lifespan(
+    settings: Settings, database_factory: DatabaseFactory
+) -> Callable[[MCPServer[AppContext]], AbstractAsyncContextManager[AppContext]]:
     @asynccontextmanager
-    async def lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
+    async def lifespan(server: MCPServer[AppContext]) -> AsyncIterator[AppContext]:
         database = database_factory(settings.database)
         await database.open()
         try:

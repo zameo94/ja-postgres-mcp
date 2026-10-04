@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from mcp import Client
 
-from ja_pst_mcp.config import DatabaseSettings, ServerSettings, Settings
+from ja_pst_mcp.config import DatabaseSettings, Settings
 from ja_pst_mcp.server import create_server
-from ja_pst_mcp.tools import database_health
 
 
 class FakeDatabase:
-    def __init__(self, settings: DatabaseSettings | None = None) -> None:
+    def __init__(self, settings: DatabaseSettings) -> None:
         self.settings = settings
         self.opened = False
         self.closed = False
@@ -28,46 +25,28 @@ class FakeDatabase:
         self.ping_count += 1
 
 
-def make_settings() -> Settings:
-    return Settings(
-        database=DatabaseSettings(
-            host="db", port=5432, name="japst", user="alice", password="s3cret"
-        ),
-        server=ServerSettings(),
-        log_level="INFO",
-    )
-
-
-class FakeContext:
-    def __init__(self, database: FakeDatabase) -> None:
-        self.request_context = SimpleNamespace(
-            lifespan_context=SimpleNamespace(database=database)
-        )
-
-
-async def test_database_health_pings_and_reports_ok() -> None:
-    database = FakeDatabase()
-
-    result = await database_health(FakeContext(database))
-
-    assert result == {"status": "ok"}
-    assert database.ping_count == 1
-
-
-async def test_database_health_tool_over_in_memory_client() -> None:
+async def test_database_health_tool_over_in_memory_client(settings: Settings) -> None:
     created: dict[str, FakeDatabase] = {}
 
-    def factory(settings: DatabaseSettings) -> FakeDatabase:
-        created["database"] = FakeDatabase(settings)
+    def factory(database_settings: DatabaseSettings) -> FakeDatabase:
+        created["database"] = FakeDatabase(database_settings)
         return created["database"]
 
-    server = create_server(make_settings(), database_factory=factory)
+    server = create_server(settings, database_factory=factory)
 
     async with Client(server, raise_exceptions=True) as client:
         listing = await client.list_tools()
-        assert "database_health" in [tool.name for tool in listing.tools]
+        tool = next(item for item in listing.tools if item.name == "database_health")
+        assert tool.title == "Database health"
+        assert tool.annotations is not None
+        assert tool.annotations.read_only_hint is True
+        assert tool.annotations.open_world_hint is False
 
-        await client.call_tool("database_health", {})
+        result = await client.call_tool("database_health", {})
+
+        assert result.is_error is False
+        assert result.structured_content == {"status": "ok"}
+        assert created["database"].settings == settings.database
         assert created["database"].ping_count == 1
 
     assert created["database"].opened is True

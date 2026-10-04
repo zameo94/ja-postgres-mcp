@@ -16,7 +16,7 @@ async def database_health(ctx: Context[AppContext]) -> dict[str, str]:
     return {"status": "ok"}
 
 
-def register_tools(server: MCPServer) -> None:
+def register_tools(server: MCPServer[AppContext]) -> None:
     """Register every MCP tool on ``server``."""
     server.tool(
         title="Database health",

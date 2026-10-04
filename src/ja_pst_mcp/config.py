@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Literal, Mapping, cast
 
 from dotenv import dotenv_values, find_dotenv
 
 _ENV_PREFIX = "JA_PST_"
 
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
 _DEFAULT_DB_PORT = 5432
 _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS = 10
 _DEFAULT_SERVER_HOST = "0.0.0.0"
 _DEFAULT_SERVER_PORT = 8000
-_DEFAULT_LOG_LEVEL = "INFO"
+_DEFAULT_LOG_LEVEL: LogLevel = "INFO"
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 
 
@@ -42,7 +44,7 @@ class ServerSettings:
 class Settings:
     database: DatabaseSettings
     server: ServerSettings
-    log_level: str = _DEFAULT_LOG_LEVEL
+    log_level: LogLevel = _DEFAULT_LOG_LEVEL
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -71,11 +73,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         ),
     )
 
-    log_level = env.get(_ENV_PREFIX + "LOG_LEVEL", _DEFAULT_LOG_LEVEL).strip().upper()
-    if log_level not in _VALID_LOG_LEVELS:
-        raise ConfigurationError(
-            f"{_ENV_PREFIX}LOG_LEVEL must be one of {sorted(_VALID_LOG_LEVELS)}"
-        )
+    log_level = _optional_log_level(env, "LOG_LEVEL", default=_DEFAULT_LOG_LEVEL)
 
     server = ServerSettings(
         host=_optional_str(env, "SERVER_HOST", default=_DEFAULT_SERVER_HOST),
@@ -111,6 +109,17 @@ def _required(environ: Mapping[str, str], key: str) -> str:
 def _optional_str(environ: Mapping[str, str], key: str, *, default: str) -> str:
     raw = environ.get(_ENV_PREFIX + key, "")
     return raw.strip() or default
+
+
+def _optional_log_level(
+    environ: Mapping[str, str], key: str, *, default: LogLevel
+) -> LogLevel:
+    value = environ.get(_ENV_PREFIX + key, default).strip().upper()
+    if value not in _VALID_LOG_LEVELS:
+        raise ConfigurationError(
+            f"{_ENV_PREFIX}{key} must be one of {sorted(_VALID_LOG_LEVELS)}"
+        )
+    return cast(LogLevel, value)
 
 
 def _optional_int(
