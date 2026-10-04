@@ -26,9 +26,19 @@ application authentication or `/api/...` endpoints — those belong to
 6. Never claim tests pass if they were not executed.
 7. Do **not** modify `README.md` during implementation; documentation is done at the end.
 
+## Git rules
+
+- **Never** run `git commit`, `git add`, `git status` or `git push`. The developer performs all git operations.
+- Branch naming style: `feature/<short-name>` (e.g. `feature/add-configuration`).
+- Do not create commits, amend history or push.
+
 ## Configuration and security
 
 - All environment-specific or sensitive config comes from environment variables.
+- All sensitive variables live in a local `.env` file, which is gitignored.
+  - A committed `.env.example` documents every variable with placeholder values.
+  - The developer copies `.env.example` to `.env` and fills in real values.
+  - Configuration is read from `.env`, with real environment variables taking precedence.
 - Never hardcode or commit credentials, passwords or connection strings.
 - Never use raw string concatenation for SQL; use parameterized queries.
 - Never expose arbitrary SQL execution as a tool without explicit approval.
@@ -49,7 +59,10 @@ pytest
 ```
 src/ja_pst_mcp/    # package
 tests/             # pytest tests
+.github/workflows/ # CI
 pyproject.toml     # project + tooling config
+.env.example       # documented environment variables (committed)
+.env               # real values (gitignored)
 ```
 
 ## Conventions
