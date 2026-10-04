@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import psycopg
 from psycopg import OperationalError
 
 from ja_pst_mcp import database as database_module
@@ -92,12 +94,14 @@ class FakeAsyncPool:
         kwargs: dict[str, Any],
         min_size: int,
         max_size: int,
+        timeout: float,
         open: bool,
     ) -> None:
         self.conninfo = conninfo
         self.kwargs = kwargs
         self.min_size = min_size
         self.max_size = max_size
+        self.timeout = timeout
         self.auto_open = open
         self.open_calls: list[tuple[bool, float | None]] = []
         self.close_calls = 0
@@ -155,7 +159,21 @@ def test_pool_is_configured_from_settings(pool_spy: PoolSpy) -> None:
     assert pool_spy.pool.kwargs == build_connection_kwargs(SETTINGS)
     assert pool_spy.pool.min_size == 1
     assert pool_spy.pool.max_size == 5
+    assert pool_spy.pool.timeout == 30
     assert pool_spy.pool.auto_open is False
+
+
+def test_pool_sizes_come_from_settings(pool_spy: PoolSpy) -> None:
+    settings = replace(
+        SETTINGS, pool_min_size=2, pool_max_size=9, pool_timeout_seconds=12
+    )
+
+    Database(settings)
+
+    assert pool_spy.pool is not None
+    assert pool_spy.pool.min_size == 2
+    assert pool_spy.pool.max_size == 9
+    assert pool_spy.pool.timeout == 12
 
 
 def test_database_does_not_open_pool_on_construction(pool_spy: PoolSpy) -> None:
@@ -410,3 +428,31 @@ async def test_fetch_rows_rejects_empty_query(pool_spy: PoolSpy) -> None:
 
     with pytest.raises(InvalidQueryError):
         await database.fetch_rows("   ")
+
+
+async def test_fetch_rows_translates_multiple_statements_error(
+    pool_spy: PoolSpy,
+) -> None:
+    database = Database(SETTINGS)
+    assert pool_spy.pool is not None
+    connection = pool_spy.pool.connection_instance
+    connection.cursor_instance.raise_on_execute = psycopg.errors.SyntaxError(
+        "cannot insert multiple commands into a prepared statement"
+    )
+
+    with pytest.raises(InvalidQueryError, match="only a single statement is allowed"):
+        await database.fetch_rows("SELECT 1; SELECT 2")
+
+
+async def test_fetch_rows_keeps_other_sql_errors_generic(pool_spy: PoolSpy) -> None:
+    database = Database(SETTINGS)
+    assert pool_spy.pool is not None
+    connection = pool_spy.pool.connection_instance
+    connection.cursor_instance.raise_on_execute = psycopg.errors.SyntaxError(
+        "syntax error at or near SELECT"
+    )
+
+    with pytest.raises(DatabaseError) as excinfo:
+        await database.fetch_rows("SELECT bad")
+
+    assert not isinstance(excinfo.value, InvalidQueryError)

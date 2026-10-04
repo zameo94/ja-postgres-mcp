@@ -56,6 +56,9 @@ application authentication or `/api/...` endpoints — those belong to
   `pg_toast`) by default; empty allowlist means all non-system schemas.
 - Every pooled connection is `default_transaction_read_only=on`; analysis query
   timeouts are set locally per transaction.
+- The connection pool is configured via `JA_PST_DB_POOL_MIN`,
+  `JA_PST_DB_POOL_MAX` and `JA_PST_DB_POOL_TIMEOUT`; it bounds how many queries
+  run concurrently (each `fetch_rows` checks out its own connection).
 - Analysis queries run through a **server-side cursor** (`DECLARE ... CURSOR`),
   which uses the extended protocol, so **multiple statements are structurally
   impossible** and rows are fetched in batches with bounded client memory.
@@ -66,7 +69,8 @@ application authentication or `/api/...` endpoints — those belong to
 
 1. Read-only query foundation (limits config + `Database.fetch_rows`). **Done.**
 2. `db_run_read_only_query` (core analysis tool) and `db_health`. **Done.**
-3. Discovery tools: `db_list_schemas`, `db_list_tables`, `db_describe_table`,
+3. Discovery tools (in progress): `db_list_schemas` **done**; next
+   `db_list_tables`, `db_describe_table`,
    constraints/relationships/indexes, `db_get_view_definition`.
 4. `db_preview_table`.
 
@@ -94,6 +98,12 @@ application authentication or `/api/...` endpoints — those belong to
     no custom SSE. `Context.report_progress` is the only progress channel.
 - Caching is **not** implemented now (nondeterministic queries, staleness,
   invalidation); `fetch_rows` stays stateless so a cache can wrap it later.
+- `QuerySettings` is the single policy object: the lifespan passes the **same**
+  instance to `Database` (execution limits: `max_rows`/timeouts) and to
+  `AppContext` (tool policy: allowed schemas), so there is one source of truth.
+- Discovery tools live in `discovery.py` (models + SQL builders); `tools.py`
+  holds only MCP handlers and registration. Discovery outputs carry a
+  `truncated` flag so a partial list is never silent.
 
 ## Security requirements (non-negotiable)
 

@@ -14,6 +14,9 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 _DEFAULT_DB_PORT = 5432
 _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS = 10
+_DEFAULT_DB_POOL_MIN = 1
+_DEFAULT_DB_POOL_MAX = 5
+_DEFAULT_DB_POOL_TIMEOUT_SECONDS = 30
 _DEFAULT_SERVER_HOST = "127.0.0.1"
 _DEFAULT_SERVER_PORT = 8000
 _DEFAULT_MAX_ROWS = 200
@@ -40,6 +43,9 @@ class DatabaseSettings:
     user: str
     password: str = field(repr=False)
     connect_timeout_seconds: int = _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS
+    pool_min_size: int = _DEFAULT_DB_POOL_MIN
+    pool_max_size: int = _DEFAULT_DB_POOL_MAX
+    pool_timeout_seconds: int = _DEFAULT_DB_POOL_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +91,17 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """
     env = _resolve_environment(environ)
 
+    pool_min_size = _optional_int(
+        env, "DB_POOL_MIN", default=_DEFAULT_DB_POOL_MIN, minimum=1
+    )
+    pool_max_size = _optional_int(
+        env, "DB_POOL_MAX", default=_DEFAULT_DB_POOL_MAX, minimum=1
+    )
+    if pool_max_size < pool_min_size:
+        raise ConfigurationError(
+            f"{_ENV_PREFIX}DB_POOL_MAX must be >= {_ENV_PREFIX}DB_POOL_MIN"
+        )
+
     database = DatabaseSettings(
         host=_required(env, "DB_HOST"),
         port=_optional_int(env, "DB_PORT", default=_DEFAULT_DB_PORT, minimum=1, maximum=65535),
@@ -95,6 +112,14 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             env,
             "DB_CONNECT_TIMEOUT",
             default=_DEFAULT_DB_CONNECT_TIMEOUT_SECONDS,
+            minimum=1,
+        ),
+        pool_min_size=pool_min_size,
+        pool_max_size=pool_max_size,
+        pool_timeout_seconds=_optional_int(
+            env,
+            "DB_POOL_TIMEOUT",
+            default=_DEFAULT_DB_POOL_TIMEOUT_SECONDS,
             minimum=1,
         ),
     )

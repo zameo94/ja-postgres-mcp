@@ -85,7 +85,7 @@ def _make_lifespan(
         database = database_factory(settings.database, settings.query)
         await database.open()
         try:
-            yield AppContext(database=database)
+            yield AppContext(database=database, query=settings.query)
         finally:
             await database.close()
 

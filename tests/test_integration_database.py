@@ -6,14 +6,22 @@ the test session, so these tests always run (Docker is required).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import psycopg
 import pytest
+from mcp import Client
 from psycopg.pq import TransactionStatus
 
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings
-from ja_pst_mcp.database import Database, DatabaseConnectionError, DatabaseError
+from ja_pst_mcp.config import DatabaseSettings, QuerySettings, ServerSettings, Settings
+from ja_pst_mcp.database import (
+    Database,
+    DatabaseConnectionError,
+    DatabaseError,
+    InvalidQueryError,
+)
+from ja_pst_mcp.server import create_server
 
 pytestmark = pytest.mark.integration
 
@@ -88,6 +96,20 @@ async def _server_cursor_count(database: Database) -> int:
 async def _transaction_status(database: Database) -> TransactionStatus:
     async with database.connection() as connection:
         return connection.pgconn.transaction_status
+
+
+async def _server_cursor_counts(database: Database, count: int) -> list[int]:
+    async def one() -> int:
+        async with database.connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'"
+                )
+                row = await cursor.fetchone()
+                assert row is not None
+                return row[0]
+
+    return await asyncio.gather(*[one() for _ in range(count)])
 
 
 @pytest.fixture
@@ -203,8 +225,62 @@ async def test_pooled_connection_reuse_has_no_side_effects(database: Database) -
     assert await _transaction_status(database) == TransactionStatus.IDLE
 
 
+async def test_concurrent_queries_are_isolated(db_settings: DatabaseSettings) -> None:
+    database = Database(db_settings, QuerySettings(max_rows=10))
+    await database.open()
+    try:
+        results = await asyncio.gather(
+            *[database.fetch_rows("SELECT %s::int AS n", (i,)) for i in range(8)]
+        )
+    finally:
+        await database.close()
+
+    assert [result.rows for result in results] == [((i,),) for i in range(8)]
+
+
+async def test_concurrent_queries_have_independent_timeouts(
+    db_settings: DatabaseSettings,
+) -> None:
+    slow = Database(db_settings, QuerySettings(statement_timeout_seconds=1))
+    fast = Database(db_settings, QuerySettings(statement_timeout_seconds=10))
+    await slow.open()
+    await fast.open()
+    try:
+        slow_task = asyncio.create_task(slow.fetch_rows("SELECT pg_sleep(3)"))
+        fast_result = await fast.fetch_rows("SELECT 1 AS n")
+        with pytest.raises(DatabaseError):
+            await slow_task
+    finally:
+        await slow.close()
+        await fast.close()
+
+    assert fast_result.rows == ((1,),)
+
+
+async def test_concurrent_queries_leave_pool_clean(
+    db_settings: DatabaseSettings,
+) -> None:
+    database = Database(db_settings, QuerySettings(max_rows=5))
+    await database.open()
+    try:
+        await asyncio.gather(
+            *[
+                database.fetch_rows("SELECT generate_series(1, 50) AS n")
+                for _ in range(6)
+            ]
+        )
+
+        assert await _server_cursor_counts(database, 5) == [0, 0, 0, 0, 0]
+
+        reused = await database.fetch_rows("SELECT 1 AS n")
+        assert reused.rows == ((1,),)
+        assert await _transaction_status(database) == TransactionStatus.IDLE
+    finally:
+        await database.close()
+
+
 async def test_fetch_rows_rejects_multiple_statements(database: Database) -> None:
-    with pytest.raises(DatabaseError):
+    with pytest.raises(InvalidQueryError, match="only a single statement is allowed"):
         await database.fetch_rows("SELECT 1; SELECT 2")
 
 
@@ -260,6 +336,104 @@ async def test_params_are_not_interpolated(database: Database, probe_table: str)
     )
 
     assert result.rows == ((payload,),)
+
+
+async def test_db_list_schemas_tool_end_to_end(db_settings: DatabaseSettings) -> None:
+    settings = Settings(
+        database=db_settings,
+        server=ServerSettings(),
+        query=QuerySettings(),
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_schemas", {})
+
+    assert result.is_error is False
+    names = [schema["name"] for schema in result.structured_content["schemas"]]
+    assert "public" in names
+    assert "information_schema" not in names
+    assert not any(name.startswith("pg_") for name in names)
+    assert result.structured_content["truncated"] is False
+
+
+async def test_db_list_schemas_tool_with_allowlist(db_settings: DatabaseSettings) -> None:
+    settings = Settings(
+        database=db_settings,
+        server=ServerSettings(),
+        query=QuerySettings(allowed_schemas=("public",)),
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_schemas", {})
+
+    names = [schema["name"] for schema in result.structured_content["schemas"]]
+    assert names == ["public"]
+
+
+@pytest.fixture
+async def limited_settings(db_settings: DatabaseSettings) -> AsyncIterator[DatabaseSettings]:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_sales CASCADE")
+        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_hidden CASCADE")
+        await connection.execute("DROP ROLE IF EXISTS ja_pst_limited")
+        await connection.execute("CREATE SCHEMA ja_pst_sales")
+        await connection.execute("CREATE SCHEMA ja_pst_hidden")
+        await connection.execute("CREATE ROLE ja_pst_limited LOGIN PASSWORD 'limited'")
+        await connection.execute("GRANT USAGE ON SCHEMA ja_pst_sales TO ja_pst_limited")
+        await connection.commit()
+        yield DatabaseSettings(
+            host=db_settings.host,
+            port=db_settings.port,
+            name=db_settings.name,
+            user="ja_pst_limited",
+            password="limited",
+        )
+    finally:
+        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_sales CASCADE")
+        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_hidden CASCADE")
+        await connection.execute("DROP ROLE IF EXISTS ja_pst_limited")
+        await connection.commit()
+        await connection.close()
+
+
+async def test_db_list_schemas_respects_least_privilege(
+    limited_settings: DatabaseSettings,
+) -> None:
+    settings = Settings(
+        database=limited_settings,
+        server=ServerSettings(),
+        query=QuerySettings(),
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_schemas", {})
+
+    names = [schema["name"] for schema in result.structured_content["schemas"]]
+    assert "ja_pst_sales" in names
+    assert "ja_pst_hidden" not in names
+
+
+async def test_db_run_read_only_query_reports_multiple_statements(
+    db_settings: DatabaseSettings,
+) -> None:
+    settings = Settings(
+        database=db_settings,
+        server=ServerSettings(),
+        query=QuerySettings(),
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_run_read_only_query", {"sql": "SELECT 1; SELECT 2"}
+        )
+
+    assert result.is_error is True
+    assert "only a single statement is allowed" in result.content[0].text
 
 
 async def test_open_wraps_unreachable_database() -> None:
