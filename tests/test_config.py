@@ -36,6 +36,34 @@ def test_load_settings_applies_defaults() -> None:
     assert settings.log_level == "INFO"
 
 
+def test_server_settings_defaults() -> None:
+    settings = load_settings(VALID_ENV)
+
+    assert settings.server.host == "0.0.0.0"
+    assert settings.server.port == 8000
+
+
+def test_server_settings_can_be_overridden() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_SERVER_HOST": "127.0.0.1",
+        "JA_PST_SERVER_PORT": "9000",
+    }
+
+    settings = load_settings(env)
+
+    assert settings.server.host == "127.0.0.1"
+    assert settings.server.port == 9000
+
+
+@pytest.mark.parametrize("value", ["0", "70000", "not-a-port"])
+def test_invalid_server_port_raises(value: str) -> None:
+    env = {**VALID_ENV, "JA_PST_SERVER_PORT": value}
+
+    with pytest.raises(ConfigurationError, match="JA_PST_SERVER_PORT"):
+        load_settings(env)
+
+
 def test_load_settings_uses_explicit_optional_values() -> None:
     env = {
         **VALID_ENV,
