@@ -16,6 +16,19 @@ FastAPI, HTTP APIs, an Agent, an MCP Client, conversation handling,
 application authentication or `/api/...` endpoints — those belong to
 `ja-pst-mcp-client`.
 
+## Quality bar
+
+- This is an MVP in **scope**, not in **quality**. MVP = fewer features, not
+  worse implementations.
+- Expect senior-level engineering: clear contracts, correct typing, separated
+  responsibilities, real security, adequate tests and correct lifecycle.
+- Do **not** deliberately introduce technical debt to reach a demo. If a
+  capability is a natural part of the architecture (e.g. SQL parameterization,
+  bounded memory), design and build it correctly now instead of a throwaway
+  version.
+- At the same time, do not implement speculative features with no concrete
+  requirement (no reverse-YAGNI). Keep the design open so it can extend.
+
 ## Product and domain direction
 
 - `pst` = **PostgreSQL**. This is a **generic PostgreSQL MCP**, not a vertical
@@ -42,19 +55,66 @@ application authentication or `/api/...` endpoints — those belong to
   Discovery excludes system schemas (`pg_catalog`, `information_schema`,
   `pg_toast`) by default; empty allowlist means all non-system schemas.
 - Every pooled connection is `default_transaction_read_only=on`; analysis query
-  timeouts are set locally per transaction; **a single statement** best-effort
-  (the READ ONLY transaction is the real guard).
-- A PostgreSQL **read-only role** is recommended in deployment (defence in
-  depth, documented, not enforced by code).
+  timeouts are set locally per transaction.
+- Analysis queries run through a **server-side cursor** (`DECLARE ... CURSOR`),
+  which uses the extended protocol, so **multiple statements are structurally
+  impossible** and rows are fetched in batches with bounded client memory.
+- A PostgreSQL **least-privilege, read-only role** is the real security
+  boundary and is required in deployment (see Security requirements).
 
 ### MVP roadmap (build order)
 
-1. Read-only query foundation (limits config + `Database.fetch_rows`).
-2. `db_run_read_only_query` (core analysis tool; also rename `database_health`
-   to `db_health` for the `db_` convention).
+1. Read-only query foundation (limits config + `Database.fetch_rows`). **Done.**
+2. `db_run_read_only_query` (core analysis tool) and `db_health`. **Done.**
 3. Discovery tools: `db_list_schemas`, `db_list_tables`, `db_describe_table`,
    constraints/relationships/indexes, `db_get_view_definition`.
 4. `db_preview_table`.
+
+## Query engine design (MVP)
+
+- `db_run_read_only_query` takes `sql: str` and optional `params` (positional
+  list or named mapping). Values always go through the driver's
+  parameterization; **never** string interpolation.
+- Multiple statements are **structurally impossible**: queries run through a
+  psycopg **server-side cursor** (`DECLARE ... CURSOR`), which uses the extended
+  protocol. There is no hand-written SQL parser acting as a security control.
+- Result model: `columns` plus positional `rows` (value tuples aligned by
+  index), so **duplicate column names never collapse**, plus `row_count`
+  (rows actually returned) and `truncated`.
+- Serialization contract (see `QueryResult` docstring): `str`/`int`/`float`/
+  `bool`/`null` pass through; `json`/`jsonb` → `dict`/`list`; `bytes` → hex;
+  `Decimal` → `str` (exactness); `date`/`datetime` → ISO 8601; other → `str`.
+- Four distinct concerns, kept separate:
+  - **safety limit** — `max_rows` + `truncated`;
+  - **DB/result streaming** — server-side cursor fetches rows in batches from
+    the server (bounded client memory); closing the cursor releases the portal;
+  - **pagination** — not exposed for arbitrary SQL; the model writes
+    `LIMIT`/`OFFSET` itself;
+  - **transport streaming** — MCP returns one tool result; no row streaming and
+    no custom SSE. `Context.report_progress` is the only progress channel.
+- Caching is **not** implemented now (nondeterministic queries, staleness,
+  invalidation); `fetch_rows` stays stateless so a cache can wrap it later.
+
+## Security requirements (non-negotiable)
+
+- Treat every model-generated query as **hostile input**.
+- It must be **technically impossible** to mutate the database: `INSERT`,
+  `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE`, `CREATE`, `ALTER`, `DROP`, `GRANT`,
+  `REVOKE`, `COMMENT`, `VACUUM`, `CALL`, DDL, permission changes, and
+  side-effecting functions/procedures.
+- Defence in depth, each layer independent:
+  `MCP input -> tool validation -> parameterization -> extended protocol
+  (single statement) -> READ ONLY transaction -> least-privilege role ->
+  PostgreSQL`.
+- PostgreSQL (READ ONLY + role privileges) is the **real** security boundary,
+  not the Python code.
+- The MCP role is least privilege: `CONNECT`, `USAGE` on needed schemas,
+  `SELECT` on needed relations, no write/DDL, no membership in privileged
+  roles, and no `EXECUTE` on dangerous functions/extensions (`dblink`,
+  `postgres_fdw` writes, `COPY ... PROGRAM`, large-object file functions, ...).
+  Read-only does **not** make every `SELECT` safe by itself.
+- No SQL injection surface in our code: dynamic values only via driver params.
+- Never return sensitive data to the client; keep server logs sanitized.
 
 ## MCP server
 
@@ -84,7 +144,7 @@ application authentication or `/api/...` endpoints — those belong to
 
 1. Work in **small, independent, reviewable steps** (a single responsibility per step).
 2. For each step: explain the goal, implement only that step, add/update tests.
-3. **Do NOT run tests** (`pytest`, runners, integration tests, Docker tests). Write them; the developer executes them.
+3. **Do NOT run tests** (`pytest`, runners, integration tests, Docker tests). Write them; the developer executes them. A one-off run explicitly requested by the developer is an **exception**, not a policy change; the agent otherwise prepares tests and reports the commands to run.
 4. **Do NOT build or run Docker** (`docker build`, `docker run`). Configure only.
 5. After each step, stop and wait for explicit approval before the next step.
 6. Never claim tests pass if they were not executed.
@@ -134,6 +194,8 @@ poetry install
 poetry run pytest
 
 # Tests (developer-run only; agents must not execute)
+# Unit + integration run together; the integration tests provision a throwaway
+# PostgreSQL 15 automatically via testcontainers (Docker required).
 pytest
 ```
 
