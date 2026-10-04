@@ -29,6 +29,7 @@ class QueryOutput(BaseModel):
 
     columns: list[str]
     rows: list[list[Any]]
+    row_count: int
     truncated: bool
 
 
@@ -55,20 +56,27 @@ async def db_health(ctx: Context[AppContext]) -> dict[str, str]:
     return {"status": "ok"}
 
 
-async def db_run_read_only_query(ctx: Context[AppContext], sql: str) -> QueryOutput:
+async def db_run_read_only_query(
+    ctx: Context[AppContext],
+    sql: str,
+    params: dict[str, Any] | list[Any] | None = None,
+) -> QueryOutput:
     """Run a single read-only SQL statement (SELECT/aggregations) and return rows.
 
     Use it to answer business questions on the connected database; discover the
     schema first with the discovery tools. Writing is impossible (read-only).
+    ``params`` are bound by the driver (``%(name)s`` for named, ``%s`` for
+    positional); never build SQL by interpolating values.
     """
     database = ctx.request_context.lifespan_context.database
     try:
-        result = await database.fetch_rows(sql)
+        result = await database.fetch_rows(sql, params)
     except DatabaseError as exc:
         raise _tool_error("db_run_read_only_query", exc) from exc
     return QueryOutput(
         columns=list(result.columns),
         rows=[list(row) for row in result.rows],
+        row_count=result.row_count,
         truncated=result.truncated,
     )
 

@@ -56,9 +56,9 @@ application authentication or `/api/...` endpoints — those belong to
   `pg_toast`) by default; empty allowlist means all non-system schemas.
 - Every pooled connection is `default_transaction_read_only=on`; analysis query
   timeouts are set locally per transaction.
-- Analysis queries run through the **extended protocol** (`Cursor.stream()`),
-  which makes **multiple statements structurally impossible** and streams rows
-  with bounded client memory. This is not a hand-written SQL parser.
+- Analysis queries run through a **server-side cursor** (`DECLARE ... CURSOR`),
+  which uses the extended protocol, so **multiple statements are structurally
+  impossible** and rows are fetched in batches with bounded client memory.
 - A PostgreSQL **least-privilege, read-only role** is the real security
   boundary and is required in deployment (see Security requirements).
 
@@ -75,18 +75,19 @@ application authentication or `/api/...` endpoints — those belong to
 - `db_run_read_only_query` takes `sql: str` and optional `params` (positional
   list or named mapping). Values always go through the driver's
   parameterization; **never** string interpolation.
-- Multiple statements are **structurally impossible**: queries run through
-  psycopg's extended protocol via `Cursor.stream()`. There is no hand-written
-  SQL parser acting as a security control.
+- Multiple statements are **structurally impossible**: queries run through a
+  psycopg **server-side cursor** (`DECLARE ... CURSOR`), which uses the extended
+  protocol. There is no hand-written SQL parser acting as a security control.
 - Result model: `columns` plus positional `rows` (value tuples aligned by
-  index), so **duplicate column names never collapse**, plus `truncated`.
+  index), so **duplicate column names never collapse**, plus `row_count`
+  (rows actually returned) and `truncated`.
 - Serialization contract (see `QueryResult` docstring): `str`/`int`/`float`/
   `bool`/`null` pass through; `json`/`jsonb` → `dict`/`list`; `bytes` → hex;
   `Decimal` → `str` (exactness); `date`/`datetime` → ISO 8601; other → `str`.
 - Four distinct concerns, kept separate:
   - **safety limit** — `max_rows` + `truncated`;
-  - **DB/result streaming** — `Cursor.stream()` single-row mode; stopping early
-    cancels the query (bounded memory);
+  - **DB/result streaming** — server-side cursor fetches rows in batches from
+    the server (bounded client memory); closing the cursor releases the portal;
   - **pagination** — not exposed for arbitrary SQL; the model writes
     `LIMIT`/`OFFSET` itself;
   - **transport streaming** — MCP returns one tool result; no row streaming and
