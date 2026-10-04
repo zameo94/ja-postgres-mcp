@@ -194,6 +194,8 @@ poetry install
 poetry run pytest
 
 # Tests (developer-run only; agents must not execute)
+# Unit + integration run together; the integration tests provision a throwaway
+# PostgreSQL 15 automatically via testcontainers (Docker required).
 pytest
 ```
 

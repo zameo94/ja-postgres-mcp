@@ -1,19 +1,18 @@
-"""Integration tests against a real PostgreSQL (opt-in via ``JA_PST_DB_*``).
+"""Integration tests against a real PostgreSQL.
 
-Skipped unless the database variables are present in the process environment,
-so a plain ``pytest`` run never touches a real database by accident.
+A throwaway PostgreSQL 15 is provisioned automatically by testcontainers for
+the test session, so these tests always run (Docker is required).
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 
 import psycopg
 import pytest
 from psycopg.pq import TransactionStatus
 
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings, Settings, load_settings
+from ja_pst_mcp.config import DatabaseSettings, QuerySettings
 from ja_pst_mcp.database import Database, DatabaseConnectionError, DatabaseError
 
 pytestmark = pytest.mark.integration
@@ -45,15 +44,19 @@ DATA_MODIFYING_CTES = [
 
 
 @pytest.fixture
-def db_settings() -> Settings:
-    if "JA_PST_DB_HOST" not in os.environ:
-        pytest.skip("set JA_PST_DB_* in the environment to run integration tests")
-    return load_settings(os.environ)
+def db_settings(postgres_container) -> DatabaseSettings:
+    return DatabaseSettings(
+        host=postgres_container.get_container_host_ip(),
+        port=postgres_container.get_exposed_port(5432),
+        name=postgres_container.dbname,
+        user=postgres_container.username,
+        password=postgres_container.password,
+    )
 
 
 @pytest.fixture
-async def database(db_settings: Settings) -> AsyncIterator[Database]:
-    database = Database(db_settings.database, db_settings.query)
+async def database(db_settings: DatabaseSettings) -> AsyncIterator[Database]:
+    database = Database(db_settings, QuerySettings())
     await database.open()
     try:
         yield database
@@ -88,19 +91,13 @@ async def _transaction_status(database: Database) -> TransactionStatus:
 
 
 @pytest.fixture
-async def probe_table(db_settings: Settings) -> AsyncIterator[str]:
-    connection = await _connect_writable(db_settings.database)
+async def probe_table(db_settings: DatabaseSettings) -> AsyncIterator[str]:
+    connection = await _connect_writable(db_settings)
     try:
-        try:
-            await connection.execute(f"DROP TABLE IF EXISTS {PROBE_TABLE}")
-            await connection.execute(f"CREATE TABLE {PROBE_TABLE} (id int, note text)")
-            await connection.execute(
-                f"INSERT INTO {PROBE_TABLE} VALUES (1, 'original')"
-            )
-            await connection.commit()
-        except psycopg.Error:
-            await connection.rollback()
-            pytest.skip("integration role cannot create a probe table")
+        await connection.execute(f"DROP TABLE IF EXISTS {PROBE_TABLE}")
+        await connection.execute(f"CREATE TABLE {PROBE_TABLE} (id int, note text)")
+        await connection.execute(f"INSERT INTO {PROBE_TABLE} VALUES (1, 'original')")
+        await connection.commit()
         yield PROBE_TABLE
     finally:
         try:
@@ -175,9 +172,9 @@ async def test_no_residual_server_cursor_after_query(database: Database) -> None
 
 
 async def test_no_residual_server_cursor_after_truncation(
-    db_settings: Settings,
+    db_settings: DatabaseSettings,
 ) -> None:
-    database = Database(db_settings.database, QuerySettings(max_rows=5))
+    database = Database(db_settings, QuerySettings(max_rows=5))
     await database.open()
     try:
         result = await database.fetch_rows("SELECT generate_series(1, 10) AS n")
@@ -211,8 +208,8 @@ async def test_fetch_rows_rejects_multiple_statements(database: Database) -> Non
         await database.fetch_rows("SELECT 1; SELECT 2")
 
 
-async def test_fetch_rows_caps_rows(db_settings: Settings) -> None:
-    database = Database(db_settings.database, QuerySettings(max_rows=5))
+async def test_fetch_rows_caps_rows(db_settings: DatabaseSettings) -> None:
+    database = Database(db_settings, QuerySettings(max_rows=5))
     await database.open()
     try:
         result = await database.fetch_rows("SELECT generate_series(1, 10) AS n")

@@ -24,6 +24,7 @@ ja-pst-mcp = "ja_pst_mcp.server:main"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "testcontainers[postgres]>=4.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -34,5 +35,5 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 markers = [
-    "integration: requires a running PostgreSQL (set JA_PST_DB_* in the environment)",
+    "integration: requires a PostgreSQL provisioned automatically by testcontainers",
 ]
