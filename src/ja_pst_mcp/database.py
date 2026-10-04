@@ -19,6 +19,9 @@ _POOL_MAX_SIZE = 5
 _READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
 # Prefix for the server-side cursor name (unique per query).
 _CURSOR_NAME_PREFIX = "ja_pst_"
+# PostgreSQL error raised when the extended protocol receives several commands.
+_MULTIPLE_STATEMENTS_SQLSTATE = "42601"
+_MULTIPLE_STATEMENTS_MESSAGE = "cannot insert multiple commands"
 
 QueryParams = Sequence[Any] | Mapping[str, Any]
 
@@ -169,10 +172,19 @@ class Database:
                 )
                 name = _CURSOR_NAME_PREFIX + uuid.uuid4().hex
                 async with connection.cursor(name=name) as cursor:
-                    await cursor.execute(query, params)
-                    if cursor.description is None:
-                        raise InvalidQueryError("query did not return a result set")
-                    fetched = await cursor.fetchmany(max_rows + 1)
+                    try:
+                        await cursor.execute(query, params)
+                        if cursor.description is None:
+                            raise InvalidQueryError(
+                                "query did not return a result set"
+                            )
+                        fetched = await cursor.fetchmany(max_rows + 1)
+                    except PsycopgError as exc:
+                        if _is_multiple_statements(exc):
+                            raise InvalidQueryError(
+                                "only a single statement is allowed"
+                            ) from exc
+                        raise
                     columns = tuple(column.name for column in cursor.description)
 
         truncated = len(fetched) > max_rows
@@ -192,6 +204,15 @@ class Database:
 
     async def __aexit__(self, *exc_info: object) -> None:
         await self.close()
+
+
+def _is_multiple_statements(exc: PsycopgError) -> bool:
+    """True for the PostgreSQL "multiple commands" error (UX hint, not security)."""
+    primary = getattr(getattr(exc, "diag", None), "message_primary", None) or str(exc)
+    return (
+        getattr(exc, "sqlstate", None) == _MULTIPLE_STATEMENTS_SQLSTATE
+        and _MULTIPLE_STATEMENTS_MESSAGE in primary
+    )
 
 
 def _jsonify(value: Any) -> Any:

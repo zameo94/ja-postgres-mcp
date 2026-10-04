@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ja_pst_mcp.config import QuerySettings
 from ja_pst_mcp.database import DatabaseProtocol
 
 
@@ -12,3 +13,4 @@ class AppContext:
     """Objects created once at startup and shared by every handler."""
 
     database: DatabaseProtocol
+    query: QuerySettings

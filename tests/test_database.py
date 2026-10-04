@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import psycopg
 from psycopg import OperationalError
 
 from ja_pst_mcp import database as database_module
@@ -410,3 +411,31 @@ async def test_fetch_rows_rejects_empty_query(pool_spy: PoolSpy) -> None:
 
     with pytest.raises(InvalidQueryError):
         await database.fetch_rows("   ")
+
+
+async def test_fetch_rows_translates_multiple_statements_error(
+    pool_spy: PoolSpy,
+) -> None:
+    database = Database(SETTINGS)
+    assert pool_spy.pool is not None
+    connection = pool_spy.pool.connection_instance
+    connection.cursor_instance.raise_on_execute = psycopg.errors.SyntaxError(
+        "cannot insert multiple commands into a prepared statement"
+    )
+
+    with pytest.raises(InvalidQueryError, match="only a single statement is allowed"):
+        await database.fetch_rows("SELECT 1; SELECT 2")
+
+
+async def test_fetch_rows_keeps_other_sql_errors_generic(pool_spy: PoolSpy) -> None:
+    database = Database(SETTINGS)
+    assert pool_spy.pool is not None
+    connection = pool_spy.pool.connection_instance
+    connection.cursor_instance.raise_on_execute = psycopg.errors.SyntaxError(
+        "syntax error at or near SELECT"
+    )
+
+    with pytest.raises(DatabaseError) as excinfo:
+        await database.fetch_rows("SELECT bad")
+
+    assert not isinstance(excinfo.value, InvalidQueryError)
