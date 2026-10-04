@@ -23,6 +23,23 @@ application authentication or `/api/...` endpoints — those belong to
   transport; do **not** add a custom REST API or non-MCP routes.
 - The client is not spawned as a subprocess: do not use stdio as the transport.
 
+## PostgreSQL compatibility
+
+- The project targets **PostgreSQL 15 and newer**.
+- Use SQL and PostgreSQL APIs compatible with every supported version (15+).
+- Do **not** scatter PostgreSQL-version conditionals across the codebase.
+- If a tool needs a feature introduced in a newer PostgreSQL version, isolate
+  that requirement inside that specific tool/database implementation and
+  document the minimum required version next to it.
+- The health check stays a basic connectivity/health check. PostgreSQL version
+  detection may be surfaced as diagnostic information but must not make the
+  health check unnecessarily complex.
+- The supported version range is documented in the README (at documentation
+  stage) and covered by integration tests, with a PostgreSQL 15 baseline,
+  wherever version-specific behavior exists.
+- When adding a database-related MCP tool, explicitly verify that its SQL and
+  PostgreSQL APIs work on the minimum supported version (15).
+
 ## Non-negotiable workflow
 
 1. Work in **small, independent, reviewable steps** (a single responsibility per step).
