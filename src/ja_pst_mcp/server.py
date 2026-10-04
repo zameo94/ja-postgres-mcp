@@ -8,7 +8,13 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-from ja_pst_mcp.config import DatabaseSettings, ServerSettings, Settings, load_settings
+from ja_pst_mcp.config import (
+    DatabaseSettings,
+    QuerySettings,
+    ServerSettings,
+    Settings,
+    load_settings,
+)
 from ja_pst_mcp.context import AppContext
 from ja_pst_mcp.database import Database, DatabaseProtocol
 from ja_pst_mcp.tools import register_tools
@@ -16,7 +22,7 @@ from ja_pst_mcp.tools import register_tools
 SERVER_NAME = "ja-pst-mcp"
 MCP_TRANSPORT = "streamable-http"
 
-DatabaseFactory = Callable[[DatabaseSettings], DatabaseProtocol]
+DatabaseFactory = Callable[[DatabaseSettings, QuerySettings], DatabaseProtocol]
 
 
 def create_server(
@@ -76,7 +82,7 @@ def _make_lifespan(
 ) -> Callable[[MCPServer[AppContext]], AbstractAsyncContextManager[AppContext]]:
     @asynccontextmanager
     async def lifespan(server: MCPServer[AppContext]) -> AsyncIterator[AppContext]:
-        database = database_factory(settings.database)
+        database = database_factory(settings.database, settings.query)
         await database.open()
         try:
             yield AppContext(database=database)

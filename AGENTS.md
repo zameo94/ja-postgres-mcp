@@ -16,6 +16,43 @@ FastAPI, HTTP APIs, an Agent, an MCP Client, conversation handling,
 application authentication or `/api/...` endpoints — those belong to
 `ja-pst-mcp-client`.
 
+## Product and domain direction
+
+- `pst` = **PostgreSQL**. This is a **generic PostgreSQL MCP**, not a vertical
+  (no legal/BI/CRM domain baked in).
+- **The database is the domain.** Tables, columns, constraints and data are
+  discovered **at runtime**; never hardcode application entities (no
+  `clients`, `invoices`, etc.). The demo database is only a test fixture.
+- The MVP is **read-only**. It must let a model answer real business questions
+  against an arbitrary PostgreSQL database:
+  `metadata discovery -> schema understanding -> read-only SQL -> result`.
+- Two tool families, kept distinct:
+  - **discovery** tools: help the model understand the DB (schemas, tables,
+    columns, constraints, indexes, views);
+  - **analysis** tools: read-only SQL/aggregations to answer questions.
+- Naming: analysis/discovery tools use the `db_` prefix (e.g.
+  `db_run_read_only_query`, `db_list_tables`).
+- No `INSERT`/`UPDATE`/`DELETE`/DDL: writing is out of MVP scope.
+
+### Read-only query policy (MVP defaults)
+
+- `JA_PST_MAX_ROWS=200`, `JA_PST_STATEMENT_TIMEOUT=5`, `JA_PST_LOCK_TIMEOUT=5`.
+- `JA_PST_ALLOWED_SCHEMAS` optional; system schemas
+  (`pg_catalog`, `information_schema`, `pg_toast`) are excluded by default.
+- Every analysis query runs in a **READ ONLY** transaction; **a single
+  statement** only.
+- A PostgreSQL **read-only role** is recommended in deployment (defence in
+  depth, documented, not enforced by code).
+
+### MVP roadmap (build order)
+
+1. Read-only query foundation (limits config + `Database.fetch_rows`).
+2. `db_run_read_only_query` (core analysis tool; also rename `database_health`
+   to `db_health` for the `db_` convention).
+3. Discovery tools: `db_list_schemas`, `db_list_tables`, `db_describe_table`,
+   constraints/relationships/indexes, `db_get_view_definition`.
+4. `db_preview_table`.
+
 ## MCP server
 
 - The server is a standalone service exposed over **MCP Streamable HTTP**

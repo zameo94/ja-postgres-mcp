@@ -16,6 +16,11 @@ _DEFAULT_DB_PORT = 5432
 _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS = 10
 _DEFAULT_SERVER_HOST = "127.0.0.1"
 _DEFAULT_SERVER_PORT = 8000
+_DEFAULT_MAX_ROWS = 200
+_DEFAULT_STATEMENT_TIMEOUT_SECONDS = 5
+_DEFAULT_LOCK_TIMEOUT_SECONDS = 5
+_MAX_MAX_ROWS = 10000
+_MAX_TIMEOUT_SECONDS = 300
 _DEFAULT_LOG_LEVEL: LogLevel = "INFO"
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 # Hosts the SDK protects by default. Keep in sync with mcp==2.3.0 (pinned by
@@ -46,9 +51,20 @@ class ServerSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class QuerySettings:
+    """Read-only analysis query policy."""
+
+    max_rows: int = _DEFAULT_MAX_ROWS
+    statement_timeout_seconds: int = _DEFAULT_STATEMENT_TIMEOUT_SECONDS
+    lock_timeout_seconds: int = _DEFAULT_LOCK_TIMEOUT_SECONDS
+    allowed_schemas: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     database: DatabaseSettings
     server: ServerSettings
+    query: QuerySettings
     log_level: LogLevel = _DEFAULT_LOG_LEVEL
 
 
@@ -90,7 +106,28 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     )
     _validate_server_settings(server)
 
-    return Settings(database=database, server=server, log_level=log_level)
+    query = QuerySettings(
+        max_rows=_optional_int(
+            env, "MAX_ROWS", default=_DEFAULT_MAX_ROWS, minimum=1, maximum=_MAX_MAX_ROWS
+        ),
+        statement_timeout_seconds=_optional_int(
+            env,
+            "STATEMENT_TIMEOUT",
+            default=_DEFAULT_STATEMENT_TIMEOUT_SECONDS,
+            minimum=1,
+            maximum=_MAX_TIMEOUT_SECONDS,
+        ),
+        lock_timeout_seconds=_optional_int(
+            env,
+            "LOCK_TIMEOUT",
+            default=_DEFAULT_LOCK_TIMEOUT_SECONDS,
+            minimum=1,
+            maximum=_MAX_TIMEOUT_SECONDS,
+        ),
+        allowed_schemas=_optional_list(env, "ALLOWED_SCHEMAS"),
+    )
+
+    return Settings(database=database, server=server, query=query, log_level=log_level)
 
 
 def _resolve_environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:

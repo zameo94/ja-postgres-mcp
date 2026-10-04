@@ -7,7 +7,7 @@ from collections.abc import Callable
 from mcp import Client
 from psycopg import OperationalError
 
-from ja_pst_mcp.config import DatabaseSettings, Settings
+from ja_pst_mcp.config import DatabaseSettings, QuerySettings, Settings
 from ja_pst_mcp.database import DatabaseConnectionError, DatabaseError
 from ja_pst_mcp.server import create_server
 from ja_pst_mcp.tools import DATABASE_OPERATION_MESSAGE, DATABASE_UNAVAILABLE_MESSAGE
@@ -37,9 +37,11 @@ class FakeDatabase:
 
 def make_factory(
     created: dict[str, FakeDatabase], error: BaseException | None = None
-) -> Callable[[DatabaseSettings], FakeDatabase]:
-    def factory(settings: DatabaseSettings) -> FakeDatabase:
-        created["database"] = FakeDatabase(settings, error)
+) -> Callable[[DatabaseSettings, QuerySettings], FakeDatabase]:
+    def factory(
+        database_settings: DatabaseSettings, query_settings: QuerySettings
+    ) -> FakeDatabase:
+        created["database"] = FakeDatabase(database_settings, error)
         return created["database"]
 
     return factory
