@@ -38,7 +38,7 @@ class FakeDatabase:
         self.opened = False
         self.closed = False
         self.ping_count = 0
-        self.queries: list[str] = []
+        self.calls: list[tuple[str, Any]] = []
 
     async def open(self) -> None:
         self.opened = True
@@ -54,7 +54,7 @@ class FakeDatabase:
     async def fetch_rows(
         self, query: str, params: Any = None
     ) -> QueryResult:
-        self.queries.append(query)
+        self.calls.append((query, params))
         if self._query_error is not None:
             raise self._query_error
         assert self._query_result is not None
@@ -145,7 +145,7 @@ async def test_db_run_read_only_query_returns_structured_result(
 ) -> None:
     created: dict[str, FakeDatabase] = {}
     query_result = QueryResult(
-        columns=("n", "label"), rows=((1, "x"),), truncated=False
+        columns=("n", "label"), rows=((1, "x"),), row_count=1, truncated=False
     )
     server = create_server(
         settings, database_factory=make_factory(created, query_result=query_result)
@@ -168,9 +168,29 @@ async def test_db_run_read_only_query_returns_structured_result(
     assert result.structured_content == {
         "columns": ["n", "label"],
         "rows": [[1, "x"]],
+        "row_count": 1,
         "truncated": False,
     }
-    assert created["database"].queries == ["SELECT 1 AS n, 'x' AS label"]
+    assert created["database"].calls == [("SELECT 1 AS n, 'x' AS label", None)]
+
+
+async def test_db_run_read_only_query_passes_params(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(columns=("n",), rows=((1,),), row_count=1, truncated=False)
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        await client.call_tool(
+            "db_run_read_only_query",
+            {
+                "sql": "SELECT %(value)s AS n",
+                "params": {"value": 1},
+            },
+        )
+
+    assert created["database"].calls == [("SELECT %(value)s AS n", {"value": 1})]
 
 
 async def test_db_run_read_only_query_reports_invalid_query(settings: Settings) -> None:

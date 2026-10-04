@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ _POOL_MIN_SIZE = 1
 _POOL_MAX_SIZE = 5
 # Every pooled connection is read-only: the server is read-only by design.
 _READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
+# Prefix for the server-side cursor name (unique per query).
+_CURSOR_NAME_PREFIX = "ja_pst_"
 
 QueryParams = Sequence[Any] | Mapping[str, Any]
 
@@ -33,7 +36,7 @@ class DatabaseConnectionError(DatabaseError):
 
 
 class InvalidQueryError(DatabaseError):
-    """The query is rejected by policy (empty, multiple statements, no result)."""
+    """The query is rejected by policy (empty query or without a result set)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +45,8 @@ class QueryResult:
 
     ``rows`` are value tuples aligned with ``columns`` (positional), so
     duplicate column names in a query never collapse or drop data.
+    ``row_count`` is the number of rows actually returned (not the total the
+    query would produce when ``truncated`` is ``True``).
 
     Serialization convention for each value:
     ``null``/``str``/``int``/``float``/``bool`` pass through; ``json``/``jsonb``
@@ -51,6 +56,7 @@ class QueryResult:
 
     columns: tuple[str, ...]
     rows: tuple[tuple[Any, ...], ...]
+    row_count: int
     truncated: bool
 
 
@@ -140,12 +146,15 @@ class Database:
     ) -> QueryResult:
         """Run one read-only query, capped at ``max_rows`` rows.
 
-        Read-only is enforced at connection level (see ``build_connection_kwargs``);
-        statement/lock timeouts are set locally for this transaction. At most
-        ``max_rows`` rows are returned; ``truncated`` reports whether more were
-        available. A statement that produced no result set is rejected.
+        The query runs through a **server-side cursor** (`DECLARE ... CURSOR`),
+        which uses the extended protocol and therefore makes multiple statements
+        structurally impossible, fetches rows in batches from the server (bounded
+        client memory) and reports columns even for an empty result set. The
+        transaction is READ ONLY (enforced at connection level) with statement
+        and lock timeouts set locally. At most ``max_rows`` rows are returned.
         """
-        _ensure_single_statement(query)
+        if not query.strip():
+            raise InvalidQueryError("empty query")
         max_rows = self._query.max_rows
 
         async with self.connection() as connection:
@@ -158,7 +167,8 @@ class Database:
                     "SELECT set_config('lock_timeout', %s, true)",
                     (str(self._query.lock_timeout_seconds * 1000),),
                 )
-                async with connection.cursor() as cursor:
+                name = _CURSOR_NAME_PREFIX + uuid.uuid4().hex
+                async with connection.cursor(name=name) as cursor:
                     await cursor.execute(query, params)
                     if cursor.description is None:
                         raise InvalidQueryError("query did not return a result set")
@@ -169,7 +179,12 @@ class Database:
         rows = tuple(
             tuple(_jsonify(value) for value in row) for row in fetched[:max_rows]
         )
-        return QueryResult(columns=columns, rows=rows, truncated=truncated)
+        return QueryResult(
+            columns=columns,
+            rows=rows,
+            row_count=len(rows),
+            truncated=truncated,
+        )
 
     async def __aenter__(self) -> "Database":
         await self.open()
@@ -177,100 +192,6 @@ class Database:
 
     async def __aexit__(self, *exc_info: object) -> None:
         await self.close()
-
-
-def _ensure_single_statement(query: str) -> None:
-    """Best-effort guard against obviously multiple statements.
-
-    This is UX, **not** a security boundary: the read-only connection is what
-    prevents writes. It scans semicolons outside string literals and comments
-    so that valid queries containing ``;`` inside a literal are not rejected.
-    """
-    body = _without_literals_and_comments(query).strip()
-    if not body:
-        raise InvalidQueryError("empty query")
-    if body.endswith(";"):
-        body = body[:-1]
-    if ";" in body:
-        raise InvalidQueryError("only a single statement is allowed")
-
-
-def _without_literals_and_comments(sql: str) -> str:
-    out: list[str] = []
-    index = 0
-    length = len(sql)
-    while index < length:
-        char = sql[index]
-        if char in ("'", '"'):
-            out.append(" ")
-            index = _skip_quoted(sql, index, char)
-        elif char == "$":
-            end = _skip_dollar_quoted(sql, index)
-            if end is None:
-                out.append(char)
-                index += 1
-            else:
-                out.append(" ")
-                index = end
-        elif sql.startswith("--", index):
-            out.append(" ")
-            index = _skip_line_comment(sql, index)
-        elif sql.startswith("/*", index):
-            out.append(" ")
-            index = _skip_block_comment(sql, index)
-        else:
-            out.append(char)
-            index += 1
-    return "".join(out)
-
-
-def _skip_quoted(sql: str, start: int, quote: str) -> int:
-    index = start + 1
-    length = len(sql)
-    while index < length:
-        if sql[index] == quote:
-            if index + 1 < length and sql[index + 1] == quote:
-                index += 2
-                continue
-            return index + 1
-        index += 1
-    return length
-
-
-def _skip_line_comment(sql: str, start: int) -> int:
-    index = start + 2
-    length = len(sql)
-    while index < length and sql[index] != "\n":
-        index += 1
-    return index
-
-
-def _skip_block_comment(sql: str, start: int) -> int:
-    index = start + 2
-    length = len(sql)
-    depth = 1
-    while index < length and depth:
-        if sql.startswith("/*", index):
-            depth += 1
-            index += 2
-        elif sql.startswith("*/", index):
-            depth -= 1
-            index += 2
-        else:
-            index += 1
-    return index
-
-
-def _skip_dollar_quoted(sql: str, start: int) -> int | None:
-    index = start + 1
-    length = len(sql)
-    while index < length and (sql[index].isalnum() or sql[index] == "_"):
-        index += 1
-    if index >= length or sql[index] != "$":
-        return None
-    tag = sql[start : index + 1]
-    end = sql.find(tag, index + 1)
-    return length if end == -1 else end + len(tag)
 
 
 def _jsonify(value: Any) -> Any:

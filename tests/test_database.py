@@ -37,6 +37,7 @@ class FakeCursor:
         self.raise_on_execute: BaseException | None = None
         self.description: list[SimpleNamespace] | None = None
         self.rows: list[tuple[Any, ...]] = []
+        self.name: Any = None
 
     async def __aenter__(self) -> "FakeCursor":
         return self
@@ -72,7 +73,8 @@ class FakeConnection:
     async def execute(self, query: str, params: Any = None) -> None:
         self.executed.append((query, params))
 
-    def cursor(self) -> FakeCursor:
+    def cursor(self, name: Any = None) -> FakeCursor:
+        self.cursor_instance.name = name
         return self.cursor_instance
 
     async def __aenter__(self) -> "FakeConnection":
@@ -294,8 +296,28 @@ async def test_fetch_rows_caps_and_serializes(pool_spy: PoolSpy) -> None:
 
     assert result.columns == ("amount",)
     assert result.rows == (("10.50",), ("20.00",))
+    assert result.row_count == 2
     assert result.truncated is True
     assert connection.cursor_instance.executed == [("SELECT amount FROM t", None)]
+    assert connection.cursor_instance.name.startswith("ja_pst_")
+
+
+async def test_fetch_rows_reports_columns_for_empty_result(pool_spy: PoolSpy) -> None:
+    database = Database(SETTINGS)
+    assert pool_spy.pool is not None
+    connection = pool_spy.pool.connection_instance
+    connection.cursor_instance.description = [
+        SimpleNamespace(name="n"),
+        SimpleNamespace(name="label"),
+    ]
+    connection.cursor_instance.rows = []
+
+    result = await database.fetch_rows("SELECT n, label FROM t WHERE false")
+
+    assert result.columns == ("n", "label")
+    assert result.rows == ()
+    assert result.row_count == 0
+    assert result.truncated is False
 
 
 async def test_fetch_rows_keeps_duplicate_column_names(pool_spy: PoolSpy) -> None:
@@ -312,6 +334,7 @@ async def test_fetch_rows_keeps_duplicate_column_names(pool_spy: PoolSpy) -> Non
 
     assert result.columns == ("id", "id")
     assert result.rows == ((1, 2),)
+    assert result.row_count == 1
 
 
 async def test_fetch_rows_sets_local_timeouts_and_passes_params(
@@ -367,6 +390,7 @@ async def test_fetch_rows_serializes_special_values(pool_spy: PoolSpy) -> None:
     assert result.rows == (
         ("2025-01-01", "0102", {"a": [1, 2]}, None),
     )
+    assert result.row_count == 1
 
 
 async def test_fetch_rows_rejects_statement_without_result_set(
@@ -386,35 +410,3 @@ async def test_fetch_rows_rejects_empty_query(pool_spy: PoolSpy) -> None:
 
     with pytest.raises(InvalidQueryError):
         await database.fetch_rows("   ")
-
-
-@pytest.mark.parametrize(
-    "query",
-    [
-        "SELECT ';' AS sep",
-        "SELECT to_char(now(), 'YYYY;MM') AS label",
-        "SELECT 1 -- trailing; comment",
-        "SELECT 1 /* block; comment */",
-        "SELECT $$a;b$$ AS dq",
-        "SELECT 1;",
-    ],
-)
-async def test_fetch_rows_allows_semicolons_in_literals_and_comments(
-    pool_spy: PoolSpy, query: str
-) -> None:
-    database = Database(SETTINGS)
-    assert pool_spy.pool is not None
-    connection = pool_spy.pool.connection_instance
-    connection.cursor_instance.description = [SimpleNamespace(name="n")]
-    connection.cursor_instance.rows = [(1,)]
-
-    await database.fetch_rows(query)
-
-    assert connection.cursor_instance.executed == [(query, None)]
-
-
-async def test_fetch_rows_rejects_true_multiple_statements(pool_spy: PoolSpy) -> None:
-    database = Database(SETTINGS)
-
-    with pytest.raises(InvalidQueryError):
-        await database.fetch_rows("SELECT 1; SELECT 2")
