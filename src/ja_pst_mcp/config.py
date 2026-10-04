@@ -12,6 +12,8 @@ _ENV_PREFIX = "JA_PST_"
 
 _DEFAULT_DB_PORT = 5432
 _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS = 10
+_DEFAULT_SERVER_HOST = "0.0.0.0"
+_DEFAULT_SERVER_PORT = 8000
 _DEFAULT_LOG_LEVEL = "INFO"
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 
@@ -31,8 +33,15 @@ class DatabaseSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ServerSettings:
+    host: str = _DEFAULT_SERVER_HOST
+    port: int = _DEFAULT_SERVER_PORT
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     database: DatabaseSettings
+    server: ServerSettings
     log_level: str = _DEFAULT_LOG_LEVEL
 
 
@@ -68,7 +77,14 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             f"{_ENV_PREFIX}LOG_LEVEL must be one of {sorted(_VALID_LOG_LEVELS)}"
         )
 
-    return Settings(database=database, log_level=log_level)
+    server = ServerSettings(
+        host=_optional_str(env, "SERVER_HOST", default=_DEFAULT_SERVER_HOST),
+        port=_optional_int(
+            env, "SERVER_PORT", default=_DEFAULT_SERVER_PORT, minimum=1, maximum=65535
+        ),
+    )
+
+    return Settings(database=database, server=server, log_level=log_level)
 
 
 def _resolve_environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:
@@ -90,6 +106,11 @@ def _required(environ: Mapping[str, str], key: str) -> str:
     if not value:
         raise ConfigurationError(f"missing required environment variable {full_key}")
     return value
+
+
+def _optional_str(environ: Mapping[str, str], key: str, *, default: str) -> str:
+    raw = environ.get(_ENV_PREFIX + key, "")
+    return raw.strip() or default
 
 
 def _optional_int(

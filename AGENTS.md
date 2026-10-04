@@ -16,6 +16,13 @@ FastAPI, HTTP APIs, an Agent, an MCP Client, conversation handling,
 application authentication or `/api/...` endpoints — those belong to
 `ja-pst-mcp-client`.
 
+## MCP server
+
+- The server is a standalone service exposed over **MCP Streamable HTTP**
+  (`transport="streamable-http"`). The HTTP endpoint is solely the MCP
+  transport; do **not** add a custom REST API or non-MCP routes.
+- The client is not spawned as a subprocess: do not use stdio as the transport.
+
 ## Non-negotiable workflow
 
 1. Work in **small, independent, reviewable steps** (a single responsibility per step).
