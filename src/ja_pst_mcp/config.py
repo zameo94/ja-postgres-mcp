@@ -18,6 +18,8 @@ _DEFAULT_SERVER_HOST = "127.0.0.1"
 _DEFAULT_SERVER_PORT = 8000
 _DEFAULT_LOG_LEVEL: LogLevel = "INFO"
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
+# Hosts the SDK protects by default. Keep in sync with mcp==2.3.0 (pinned by
+# poetry.lock); any other host requires an explicit allowlist.
 _LOCAL_SERVER_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 

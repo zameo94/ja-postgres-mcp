@@ -15,20 +15,16 @@ services:
 
   ja-pst-mcp:
     build: .
+    env_file:
+      - .env
     environment:
       JA_PST_DB_HOST: postgres
-      JA_PST_DB_PORT: "5432"
-      JA_PST_DB_NAME: ${JA_PST_DB_NAME:-ja_pst}
-      JA_PST_DB_USER: ${JA_PST_DB_USER:-ja_pst}
-      JA_PST_DB_PASSWORD: ${JA_PST_DB_PASSWORD:?set JA_PST_DB_PASSWORD in .env}
-      JA_PST_SERVER_HOST: 0.0.0.0
-      JA_PST_SERVER_PORT: "8000"
-      JA_PST_ALLOWED_HOSTS: localhost:8000,127.0.0.1:8000,ja-pst-mcp:8000
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
   postgres-data:
+    name: ja_pst_mcp_postgres_volume

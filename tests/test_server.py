@@ -71,5 +71,24 @@ def test_transport_security_with_hosts_and_empty_origins(settings: Settings) -> 
     assert security.allowed_origins == []
 
 
+def test_run_server_passes_configured_transport_security(settings: Settings) -> None:
+    configured = replace(
+        settings,
+        server=replace(
+            settings.server,
+            allowed_hosts=("ja-pst-mcp:8000",),
+            allowed_origins=("https://app.example",),
+        ),
+    )
+    fake = FakeServer()
+
+    run_server(fake, configured)
+
+    security = fake.calls[0]["transport_security"]
+    assert isinstance(security, TransportSecuritySettings)
+    assert security.allowed_hosts == ["ja-pst-mcp:8000"]
+    assert security.allowed_origins == ["https://app.example"]
+
+
 def test_mcp_transport_is_streamable_http() -> None:
     assert MCP_TRANSPORT == "streamable-http"

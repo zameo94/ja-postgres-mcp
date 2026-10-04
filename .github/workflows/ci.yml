@@ -23,3 +23,13 @@ jobs:
 
       - name: Run tests
         run: uv run --no-sync pytest
+
+  docker:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t ja-pst-mcp:ci .

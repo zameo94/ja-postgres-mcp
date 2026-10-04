@@ -104,6 +104,25 @@ def test_allowed_origins_without_allowed_hosts_raises() -> None:
         load_settings(env)
 
 
+def test_localhost_host_without_allowlist_is_accepted() -> None:
+    settings = load_settings({**VALID_ENV, "JA_PST_SERVER_HOST": "localhost"})
+
+    assert settings.server.host == "localhost"
+    assert settings.server.allowed_hosts == ()
+
+
+def test_localhost_host_with_allowlist_is_accepted() -> None:
+    settings = load_settings(
+        {
+            **VALID_ENV,
+            "JA_PST_SERVER_HOST": "localhost",
+            "JA_PST_ALLOWED_HOSTS": "localhost:8000",
+        }
+    )
+
+    assert settings.server.allowed_hosts == ("localhost:8000",)
+
+
 @pytest.mark.parametrize("value", ["0", "70000", "not-a-port"])
 def test_invalid_server_port_raises(value: str) -> None:
     env = {**VALID_ENV, "JA_PST_SERVER_PORT": value}

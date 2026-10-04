@@ -49,11 +49,13 @@ def run_server(server: MCPServer[AppContext], settings: Settings) -> None:
 def _transport_security(
     settings: ServerSettings,
 ) -> TransportSecuritySettings | None:
-    """Enable DNS-rebinding protection only when an allowlist is configured.
+    """Return the SDK's DNS-rebinding settings for the configured allowlist.
 
-    With no ``allowed_hosts`` the SDK default applies (protection disabled for
-    a non-localhost bind). An empty allowlist with protection enabled would
-    reject every request with 421, so it is never built.
+    With no ``allowed_hosts`` this returns ``None``. For a localhost bind the
+    SDK then enables its own localhost-only protection; for a non-localhost
+    bind, :func:`load_settings` has already rejected the configuration with a
+    ``ConfigurationError``, so the server never starts a non-localhost bind
+    without protection.
     """
     if not settings.allowed_hosts:
         return None
