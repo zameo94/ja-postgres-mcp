@@ -123,6 +123,49 @@ def test_localhost_host_with_allowlist_is_accepted() -> None:
     assert settings.server.allowed_hosts == ("localhost:8000",)
 
 
+def test_query_settings_defaults() -> None:
+    settings = load_settings(VALID_ENV)
+
+    assert settings.query.max_rows == 200
+    assert settings.query.statement_timeout_seconds == 5
+    assert settings.query.lock_timeout_seconds == 5
+    assert settings.query.allowed_schemas == ()
+
+
+def test_query_settings_can_be_overridden() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_MAX_ROWS": "50",
+        "JA_PST_STATEMENT_TIMEOUT": "10",
+        "JA_PST_LOCK_TIMEOUT": "3",
+        "JA_PST_ALLOWED_SCHEMAS": "public, sales",
+    }
+
+    settings = load_settings(env)
+
+    assert settings.query.max_rows == 50
+    assert settings.query.statement_timeout_seconds == 10
+    assert settings.query.lock_timeout_seconds == 3
+    assert settings.query.allowed_schemas == ("public", "sales")
+
+
+@pytest.mark.parametrize("value", ["0", "10001", "not-a-number"])
+def test_invalid_max_rows_raises(value: str) -> None:
+    env = {**VALID_ENV, "JA_PST_MAX_ROWS": value}
+
+    with pytest.raises(ConfigurationError, match="JA_PST_MAX_ROWS"):
+        load_settings(env)
+
+
+@pytest.mark.parametrize("key", ["JA_PST_STATEMENT_TIMEOUT", "JA_PST_LOCK_TIMEOUT"])
+@pytest.mark.parametrize("value", ["0", "301"])
+def test_invalid_timeout_raises(key: str, value: str) -> None:
+    env = {**VALID_ENV, key: value}
+
+    with pytest.raises(ConfigurationError, match=key):
+        load_settings(env)
+
+
 @pytest.mark.parametrize("value", ["0", "70000", "not-a-port"])
 def test_invalid_server_port_raises(value: str) -> None:
     env = {**VALID_ENV, "JA_PST_SERVER_PORT": value}
