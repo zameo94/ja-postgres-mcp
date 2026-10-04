@@ -12,9 +12,13 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = []
 dependencies = [
+    "mcp>=2,<3",
     "psycopg[binary,pool]>=3.2",
     "python-dotenv>=1.0",
 ]
+
+[project.scripts]
+ja-pst-mcp = "ja_pst_mcp.server:main"
 
 [dependency-groups]
 dev = [
