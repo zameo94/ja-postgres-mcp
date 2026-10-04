@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
-from psycopg import AsyncConnection
+from psycopg import AsyncConnection, Error as PsycopgError
 from psycopg_pool import AsyncConnectionPool
 
 from ja_pst_mcp.config import DatabaseSettings
@@ -16,11 +16,15 @@ _POOL_MAX_SIZE = 5
 
 
 class DatabaseError(RuntimeError):
-    """Base error for database operations."""
+    """An expected PostgreSQL/pool error (connection or query failure).
+
+    Wrapped messages are generic; the original driver error is kept as
+    ``__cause__`` for server-side diagnostics.
+    """
 
 
 class DatabaseConnectionError(DatabaseError):
-    """Raised when a database connection cannot be established."""
+    """A database connection could not be acquired or established."""
 
 
 class DatabaseProtocol(Protocol):
@@ -64,10 +68,8 @@ class Database:
             await self._pool.open(
                 wait=True, timeout=self._settings.connect_timeout_seconds
             )
-        except Exception as exc:
-            raise DatabaseConnectionError(
-                "unable to connect to the database"
-            ) from exc
+        except PsycopgError as exc:
+            raise DatabaseConnectionError("unable to connect to the database") from exc
 
     async def close(self) -> None:
         """Close the pool and release all connections."""
@@ -75,9 +77,22 @@ class Database:
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[AsyncConnection]:
-        """Acquire a pooled connection for the duration of the context."""
-        async with self._pool.connection() as connection:
-            yield connection
+        """Yield a pooled connection, wrapping driver errors.
+
+        Errors acquiring the connection become ``DatabaseConnectionError``;
+        driver errors raised while the caller uses it become
+        ``DatabaseError``. Anything else propagates unchanged.
+        """
+        try:
+            async with self._pool.connection() as connection:
+                try:
+                    yield connection
+                except PsycopgError as exc:
+                    raise DatabaseError("database operation failed") from exc
+        except PsycopgError as exc:
+            raise DatabaseConnectionError(
+                "unable to acquire a database connection"
+            ) from exc
 
     async def ping(self) -> None:
         """Run a lightweight query to verify connectivity."""
