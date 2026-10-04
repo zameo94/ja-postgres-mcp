@@ -14,10 +14,11 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 _DEFAULT_DB_PORT = 5432
 _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS = 10
-_DEFAULT_SERVER_HOST = "0.0.0.0"
+_DEFAULT_SERVER_HOST = "127.0.0.1"
 _DEFAULT_SERVER_PORT = 8000
 _DEFAULT_LOG_LEVEL: LogLevel = "INFO"
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
+_LOCAL_SERVER_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class ConfigurationError(RuntimeError):
@@ -38,6 +39,8 @@ class DatabaseSettings:
 class ServerSettings:
     host: str = _DEFAULT_SERVER_HOST
     port: int = _DEFAULT_SERVER_PORT
+    allowed_hosts: tuple[str, ...] = ()
+    allowed_origins: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +83,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         port=_optional_int(
             env, "SERVER_PORT", default=_DEFAULT_SERVER_PORT, minimum=1, maximum=65535
         ),
+        allowed_hosts=_optional_list(env, "ALLOWED_HOSTS"),
+        allowed_origins=_optional_list(env, "ALLOWED_ORIGINS"),
     )
+    _validate_server_settings(server)
 
     return Settings(database=database, server=server, log_level=log_level)
 
@@ -106,9 +112,26 @@ def _required(environ: Mapping[str, str], key: str) -> str:
     return value
 
 
+def _validate_server_settings(server: ServerSettings) -> None:
+    if server.allowed_origins and not server.allowed_hosts:
+        raise ConfigurationError(
+            f"{_ENV_PREFIX}ALLOWED_ORIGINS requires {_ENV_PREFIX}ALLOWED_HOSTS"
+        )
+    if not server.allowed_hosts and server.host not in _LOCAL_SERVER_HOSTS:
+        raise ConfigurationError(
+            f"{_ENV_PREFIX}ALLOWED_HOSTS must be set when "
+            f"{_ENV_PREFIX}SERVER_HOST={server.host!r} is not localhost"
+        )
+
+
 def _optional_str(environ: Mapping[str, str], key: str, *, default: str) -> str:
     raw = environ.get(_ENV_PREFIX + key, "")
     return raw.strip() or default
+
+
+def _optional_list(environ: Mapping[str, str], key: str) -> tuple[str, ...]:
+    raw = environ.get(_ENV_PREFIX + key, "")
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
 def _optional_log_level(

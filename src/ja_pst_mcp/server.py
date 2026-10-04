@@ -6,8 +6,9 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
-from ja_pst_mcp.config import DatabaseSettings, Settings, load_settings
+from ja_pst_mcp.config import DatabaseSettings, ServerSettings, Settings, load_settings
 from ja_pst_mcp.context import AppContext
 from ja_pst_mcp.database import Database, DatabaseProtocol
 from ja_pst_mcp.tools import register_tools
@@ -41,6 +42,24 @@ def run_server(server: MCPServer[AppContext], settings: Settings) -> None:
         transport=MCP_TRANSPORT,
         host=settings.server.host,
         port=settings.server.port,
+        transport_security=_transport_security(settings.server),
+    )
+
+
+def _transport_security(
+    settings: ServerSettings,
+) -> TransportSecuritySettings | None:
+    """Enable DNS-rebinding protection only when an allowlist is configured.
+
+    With no ``allowed_hosts`` the SDK default applies (protection disabled for
+    a non-localhost bind). An empty allowlist with protection enabled would
+    reject every request with 421, so it is never built.
+    """
+    if not settings.allowed_hosts:
+        return None
+    return TransportSecuritySettings(
+        allowed_hosts=list(settings.allowed_hosts),
+        allowed_origins=list(settings.allowed_origins),
     )
 
 

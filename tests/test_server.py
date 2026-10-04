@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
-from ja_pst_mcp.config import Settings
-from ja_pst_mcp.server import MCP_TRANSPORT, SERVER_NAME, create_server, run_server
+from dataclasses import replace
+
+from mcp.server.transport_security import TransportSecuritySettings
+
+from ja_pst_mcp.config import ServerSettings, Settings
+from ja_pst_mcp.server import (
+    MCP_TRANSPORT,
+    SERVER_NAME,
+    _transport_security,
+    create_server,
+    run_server,
+)
 
 
 def test_create_server_uses_name_and_log_level(settings: Settings) -> None:
@@ -26,9 +36,39 @@ def test_run_server_uses_streamable_http_and_host_port(settings: Settings) -> No
 
     run_server(fake, settings)
 
-    assert fake.calls == [
-        {"transport": MCP_TRANSPORT, "host": "0.0.0.0", "port": 8000}
-    ]
+    call = fake.calls[0]
+    assert call["transport"] == MCP_TRANSPORT
+    assert call["host"] == settings.server.host
+    assert call["port"] == settings.server.port
+    assert call["transport_security"] is None
+
+
+def test_transport_security_is_none_without_allowlist() -> None:
+    assert _transport_security(ServerSettings()) is None
+
+
+def test_transport_security_built_from_allowlist(settings: Settings) -> None:
+    server = replace(
+        settings.server,
+        allowed_hosts=("ja-pst-mcp:8000",),
+        allowed_origins=("https://app.example",),
+    )
+
+    security = _transport_security(server)
+
+    assert isinstance(security, TransportSecuritySettings)
+    assert security.allowed_hosts == ["ja-pst-mcp:8000"]
+    assert security.allowed_origins == ["https://app.example"]
+
+
+def test_transport_security_with_hosts_and_empty_origins(settings: Settings) -> None:
+    server = replace(settings.server, allowed_hosts=("ja-pst-mcp:8000",))
+
+    security = _transport_security(server)
+
+    assert isinstance(security, TransportSecuritySettings)
+    assert security.allowed_hosts == ["ja-pst-mcp:8000"]
+    assert security.allowed_origins == []
 
 
 def test_mcp_transport_is_streamable_http() -> None:
