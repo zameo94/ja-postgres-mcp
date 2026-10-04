@@ -123,6 +123,47 @@ def test_localhost_host_with_allowlist_is_accepted() -> None:
     assert settings.server.allowed_hosts == ("localhost:8000",)
 
 
+def test_database_pool_defaults() -> None:
+    settings = load_settings(VALID_ENV)
+
+    assert settings.database.pool_min_size == 1
+    assert settings.database.pool_max_size == 5
+    assert settings.database.pool_timeout_seconds == 30
+
+
+def test_database_pool_can_be_overridden() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_DB_POOL_MIN": "2",
+        "JA_PST_DB_POOL_MAX": "10",
+        "JA_PST_DB_POOL_TIMEOUT": "15",
+    }
+
+    settings = load_settings(env)
+
+    assert settings.database.pool_min_size == 2
+    assert settings.database.pool_max_size == 10
+    assert settings.database.pool_timeout_seconds == 15
+
+
+def test_database_pool_max_lower_than_min_raises() -> None:
+    env = {**VALID_ENV, "JA_PST_DB_POOL_MIN": "5", "JA_PST_DB_POOL_MAX": "2"}
+
+    with pytest.raises(ConfigurationError, match="JA_PST_DB_POOL_MAX"):
+        load_settings(env)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["JA_PST_DB_POOL_MIN", "JA_PST_DB_POOL_MAX", "JA_PST_DB_POOL_TIMEOUT"],
+)
+def test_invalid_pool_values_raise(key: str) -> None:
+    env = {**VALID_ENV, key: "0"}
+
+    with pytest.raises(ConfigurationError, match=key):
+        load_settings(env)
+
+
 def test_query_settings_defaults() -> None:
     settings = load_settings(VALID_ENV)
 

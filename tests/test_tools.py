@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from mcp import Client
@@ -15,6 +16,7 @@ from ja_pst_mcp.database import (
     InvalidQueryError,
     QueryResult,
 )
+from ja_pst_mcp.discovery import build_list_schemas_query
 from ja_pst_mcp.server import create_server
 from ja_pst_mcp.tools import (
     DATABASE_OPERATION_MESSAGE,
@@ -219,3 +221,90 @@ async def test_db_run_read_only_query_maps_database_error(settings: Settings) ->
     text = result.content[0].text
     assert DATABASE_OPERATION_MESSAGE in text
     assert "statement timeout" not in text
+
+
+def test_build_list_schemas_query_is_unparameterized_without_allowlist() -> None:
+    query, params = build_list_schemas_query(())
+
+    assert params is None
+    assert "%s" not in query
+
+
+def test_build_list_schemas_query_parameterizes_allowlist() -> None:
+    query, params = build_list_schemas_query(("public", "sales"))
+
+    assert params == [["public", "sales"]]
+    assert "%s" in query
+
+
+async def test_db_list_schemas_returns_schemas(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        columns=("name", "owner"),
+        rows=(("public", "postgres"), ("sales", "app")),
+        row_count=2,
+        truncated=False,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        listing = await client.list_tools()
+        tool = next(item for item in listing.tools if item.name == "db_list_schemas")
+        assert tool.title == "List schemas"
+        assert tool.annotations is not None
+        assert tool.annotations.read_only_hint is True
+
+        result = await client.call_tool("db_list_schemas", {})
+
+    assert result.is_error is False
+    assert result.structured_content == {
+        "schemas": [
+            {"name": "public", "owner": "postgres"},
+            {"name": "sales", "owner": "app"},
+        ],
+        "truncated": False,
+    }
+
+
+async def test_db_list_schemas_reports_truncation(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        columns=("name", "owner"),
+        rows=(("public", "postgres"),),
+        row_count=1,
+        truncated=True,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_schemas", {})
+
+    assert result.structured_content == {
+        "schemas": [{"name": "public", "owner": "postgres"}],
+        "truncated": True,
+    }
+
+
+async def test_db_list_schemas_passes_allowlist(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    configured = replace(settings, query=QuerySettings(allowed_schemas=("public",)))
+    server = create_server(
+        configured,
+        database_factory=make_factory(
+            created,
+            query_result=QueryResult(
+                columns=("name", "owner"), rows=(), row_count=0, truncated=False
+            ),
+        ),
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        await client.call_tool("db_list_schemas", {})
+
+    query, params = created["database"].calls[0]
+    assert "= ANY(%s)" in query
+    assert params == [["public"]]
