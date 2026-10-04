@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${JA_PST_DB_NAME:-ja_pst}
+      POSTGRES_USER: ${JA_PST_DB_USER:-ja_pst}
+      POSTGRES_PASSWORD: ${JA_PST_DB_PASSWORD:?set JA_PST_DB_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ja-pst-mcp:
+    build: .
+    env_file:
+      - .env
+    environment:
+      JA_PST_DB_HOST: postgres
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+    name: ja_pst_mcp_postgres_volume

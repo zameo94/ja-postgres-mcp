@@ -39,7 +39,7 @@ def test_load_settings_applies_defaults() -> None:
 def test_server_settings_defaults() -> None:
     settings = load_settings(VALID_ENV)
 
-    assert settings.server.host == "0.0.0.0"
+    assert settings.server.host == "127.0.0.1"
     assert settings.server.port == 8000
 
 
@@ -54,6 +54,73 @@ def test_server_settings_can_be_overridden() -> None:
 
     assert settings.server.host == "127.0.0.1"
     assert settings.server.port == 9000
+
+
+def test_server_allowlists_default_to_empty() -> None:
+    settings = load_settings(VALID_ENV)
+
+    assert settings.server.allowed_hosts == ()
+    assert settings.server.allowed_origins == ()
+
+
+def test_server_allowlists_are_parsed_from_comma_separated_values() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_ALLOWED_HOSTS": "ja-pst-mcp:8000, localhost:8000",
+        "JA_PST_ALLOWED_ORIGINS": "https://app.example",
+    }
+
+    settings = load_settings(env)
+
+    assert settings.server.allowed_hosts == ("ja-pst-mcp:8000", "localhost:8000")
+    assert settings.server.allowed_origins == ("https://app.example",)
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10"])
+def test_non_localhost_host_without_allowlist_raises(host: str) -> None:
+    env = {**VALID_ENV, "JA_PST_SERVER_HOST": host}
+
+    with pytest.raises(ConfigurationError, match="JA_PST_ALLOWED_HOSTS"):
+        load_settings(env)
+
+
+def test_non_localhost_host_with_allowlist_is_accepted() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_SERVER_HOST": "0.0.0.0",
+        "JA_PST_ALLOWED_HOSTS": "ja-pst-mcp:8000",
+    }
+
+    settings = load_settings(env)
+
+    assert settings.server.host == "0.0.0.0"
+    assert settings.server.allowed_hosts == ("ja-pst-mcp:8000",)
+
+
+def test_allowed_origins_without_allowed_hosts_raises() -> None:
+    env = {**VALID_ENV, "JA_PST_ALLOWED_ORIGINS": "https://app.example"}
+
+    with pytest.raises(ConfigurationError, match="JA_PST_ALLOWED_ORIGINS"):
+        load_settings(env)
+
+
+def test_localhost_host_without_allowlist_is_accepted() -> None:
+    settings = load_settings({**VALID_ENV, "JA_PST_SERVER_HOST": "localhost"})
+
+    assert settings.server.host == "localhost"
+    assert settings.server.allowed_hosts == ()
+
+
+def test_localhost_host_with_allowlist_is_accepted() -> None:
+    settings = load_settings(
+        {
+            **VALID_ENV,
+            "JA_PST_SERVER_HOST": "localhost",
+            "JA_PST_ALLOWED_HOSTS": "localhost:8000",
+        }
+    )
+
+    assert settings.server.allowed_hosts == ("localhost:8000",)
 
 
 @pytest.mark.parametrize("value", ["0", "70000", "not-a-port"])
