@@ -52,7 +52,12 @@ class ServerSettings:
 
 @dataclass(frozen=True, slots=True)
 class QuerySettings:
-    """Read-only analysis query policy."""
+    """Read-only analysis query policy.
+
+    ``allowed_schemas`` is consumed by the discovery tools (schema/table
+    listing); it is intentionally **not** applied to ``fetch_rows``, which runs
+    arbitrary read-only SQL. Empty means "all non-system schemas".
+    """
 
     max_rows: int = _DEFAULT_MAX_ROWS
     statement_timeout_seconds: int = _DEFAULT_STATEMENT_TIMEOUT_SECONDS
@@ -64,7 +69,7 @@ class QuerySettings:
 class Settings:
     database: DatabaseSettings
     server: ServerSettings
-    query: QuerySettings
+    query: QuerySettings = field(default_factory=QuerySettings)
     log_level: LogLevel = _DEFAULT_LOG_LEVEL
 
 

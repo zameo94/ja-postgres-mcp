@@ -37,10 +37,13 @@ application authentication or `/api/...` endpoints — those belong to
 ### Read-only query policy (MVP defaults)
 
 - `JA_PST_MAX_ROWS=200`, `JA_PST_STATEMENT_TIMEOUT=5`, `JA_PST_LOCK_TIMEOUT=5`.
-- `JA_PST_ALLOWED_SCHEMAS` optional; system schemas
-  (`pg_catalog`, `information_schema`, `pg_toast`) are excluded by default.
-- Every analysis query runs in a **READ ONLY** transaction; **a single
-  statement** only.
+- `JA_PST_ALLOWED_SCHEMAS` is optional and consumed by the **discovery** tools
+  (schema/table listing); arbitrary read-only queries are not filtered by it.
+  Discovery excludes system schemas (`pg_catalog`, `information_schema`,
+  `pg_toast`) by default; empty allowlist means all non-system schemas.
+- Every pooled connection is `default_transaction_read_only=on`; analysis query
+  timeouts are set locally per transaction; **a single statement** best-effort
+  (the READ ONLY transaction is the real guard).
 - A PostgreSQL **read-only role** is recommended in deployment (defence in
   depth, documented, not enforced by code).
 

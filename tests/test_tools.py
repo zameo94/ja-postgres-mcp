@@ -8,7 +8,11 @@ from mcp import Client
 from psycopg import OperationalError
 
 from ja_pst_mcp.config import DatabaseSettings, QuerySettings, Settings
-from ja_pst_mcp.database import DatabaseConnectionError, DatabaseError
+from ja_pst_mcp.database import (
+    DatabaseConnectionError,
+    DatabaseError,
+    QueryResult,
+)
 from ja_pst_mcp.server import create_server
 from ja_pst_mcp.tools import DATABASE_OPERATION_MESSAGE, DATABASE_UNAVAILABLE_MESSAGE
 
@@ -33,6 +37,9 @@ class FakeDatabase:
         if self._error is not None:
             raise self._error
         self.ping_count += 1
+
+    async def fetch_rows(self, query: str, params: object = None) -> QueryResult:
+        raise NotImplementedError
 
 
 def make_factory(
