@@ -66,7 +66,21 @@ application authentication or `/api/...` endpoints — those belong to
 - Never hardcode or commit credentials, passwords or connection strings.
 - Never use raw string concatenation for SQL; use parameterized queries.
 - Never expose arbitrary SQL execution as a tool without explicit approval.
-- Do not log or return sensitive data (passwords, connection strings, stack traces).
+- Never return sensitive data to the MCP client (passwords, connection strings,
+  driver messages, stack traces, infrastructure details). Expected database
+  errors are wrapped and exposed as a generic, safe message.
+- Server logs stay diagnostic but sanitized: never log passwords, secrets,
+  tokens or full DSNs. Expected database errors are logged (with cause) for
+  debugging; unexpected errors keep their full traceback.
+
+## Error handling
+
+- Expected database/pool errors are wrapped in `DatabaseError` /
+  `DatabaseConnectionError` and mapped to a safe `ToolError` at the MCP tool
+  boundary. The original driver error is preserved as `__cause__` for server
+  logs, never for the client.
+- Unexpected application errors are not masked as database errors; the SDK
+  logs their full traceback and the client receives only a generic message.
 
 ## Commands
 
