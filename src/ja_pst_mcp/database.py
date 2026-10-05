@@ -8,7 +8,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from psycopg import AsyncConnection, Error as PsycopgError
+from psycopg import AsyncConnection
+from psycopg import Error as PsycopgError
 from psycopg_pool import AsyncConnectionPool
 
 from ja_pst_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
@@ -103,9 +104,7 @@ def build_connection_kwargs(settings: DatabaseSettings) -> dict[str, Any]:
 class Database:
     """Owns the lifecycle of the PostgreSQL connection pool."""
 
-    def __init__(
-        self, settings: DatabaseSettings, query: QuerySettings | None = None
-    ) -> None:
+    def __init__(self, settings: DatabaseSettings, query: QuerySettings | None = None) -> None:
         self._settings = settings
         self._query = query or QuerySettings()
         self._pool = AsyncConnectionPool(
@@ -120,9 +119,7 @@ class Database:
     async def open(self) -> None:
         """Open the pool, waiting until a connection is established."""
         try:
-            await self._pool.open(
-                wait=True, timeout=self._settings.connect_timeout_seconds
-            )
+            await self._pool.open(wait=True, timeout=self._settings.connect_timeout_seconds)
         except PsycopgError as exc:
             raise DatabaseConnectionError("unable to connect to the database") from exc
 
@@ -145,9 +142,7 @@ class Database:
                 except PsycopgError as exc:
                     raise DatabaseError("database operation failed") from exc
         except PsycopgError as exc:
-            raise DatabaseConnectionError(
-                "unable to acquire a database connection"
-            ) from exc
+            raise DatabaseConnectionError("unable to acquire a database connection") from exc
 
     async def ping(self) -> None:
         """Run a lightweight query to verify connectivity."""
@@ -183,9 +178,7 @@ class Database:
             raise InvalidQueryError("empty query")
         limit = self._query.max_rows if max_rows is None else max_rows
         if limit < 1 or limit > HARD_MAX_ROWS:
-            raise InvalidQueryError(
-                f"row limit must be between 1 and {HARD_MAX_ROWS}"
-            )
+            raise InvalidQueryError(f"row limit must be between 1 and {HARD_MAX_ROWS}")
 
         async with self.connection() as connection:
             async with connection.transaction():
@@ -202,22 +195,16 @@ class Database:
                     try:
                         await cursor.execute(query, params)
                         if cursor.description is None:
-                            raise InvalidQueryError(
-                                "query did not return a result set"
-                            )
+                            raise InvalidQueryError("query did not return a result set")
                         fetched = await cursor.fetchmany(limit + 1)
                     except PsycopgError as exc:
                         if _is_multiple_statements(exc):
-                            raise InvalidQueryError(
-                                "only a single statement is allowed"
-                            ) from exc
+                            raise InvalidQueryError("only a single statement is allowed") from exc
                         raise
                     columns = tuple(column.name for column in cursor.description)
 
         truncated = len(fetched) > limit
-        rows = tuple(
-            tuple(_jsonify(value) for value in row) for row in fetched[:limit]
-        )
+        rows = tuple(tuple(_jsonify(value) for value in row) for row in fetched[:limit])
         return QueryResult(
             columns=columns,
             rows=rows,
@@ -225,7 +212,7 @@ class Database:
             truncated=truncated,
         )
 
-    async def __aenter__(self) -> "Database":
+    async def __aenter__(self) -> Database:
         await self.open()
         return self
 

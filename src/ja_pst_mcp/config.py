@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal, Mapping, cast
+from typing import Literal, cast
 
 from dotenv import dotenv_values, find_dotenv
 
@@ -102,16 +103,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """
     env = _resolve_environment(environ)
 
-    pool_min_size = _optional_int(
-        env, "DB_POOL_MIN", default=_DEFAULT_DB_POOL_MIN, minimum=1
-    )
-    pool_max_size = _optional_int(
-        env, "DB_POOL_MAX", default=_DEFAULT_DB_POOL_MAX, minimum=1
-    )
+    pool_min_size = _optional_int(env, "DB_POOL_MIN", default=_DEFAULT_DB_POOL_MIN, minimum=1)
+    pool_max_size = _optional_int(env, "DB_POOL_MAX", default=_DEFAULT_DB_POOL_MAX, minimum=1)
     if pool_max_size < pool_min_size:
-        raise ConfigurationError(
-            f"{_ENV_PREFIX}DB_POOL_MAX must be >= {_ENV_PREFIX}DB_POOL_MIN"
-        )
+        raise ConfigurationError(f"{_ENV_PREFIX}DB_POOL_MAX must be >= {_ENV_PREFIX}DB_POOL_MIN")
 
     database = DatabaseSettings(
         host=_required(env, "DB_HOST"),
@@ -162,8 +157,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     )
     if discovery_max_page_size < discovery_page_size:
         raise ConfigurationError(
-            f"{_ENV_PREFIX}DISCOVERY_MAX_PAGE_SIZE must be >= "
-            f"{_ENV_PREFIX}DISCOVERY_PAGE_SIZE"
+            f"{_ENV_PREFIX}DISCOVERY_MAX_PAGE_SIZE must be >= {_ENV_PREFIX}DISCOVERY_PAGE_SIZE"
         )
 
     query = QuerySettings(
@@ -235,14 +229,10 @@ def _optional_list(environ: Mapping[str, str], key: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
-def _optional_log_level(
-    environ: Mapping[str, str], key: str, *, default: LogLevel
-) -> LogLevel:
+def _optional_log_level(environ: Mapping[str, str], key: str, *, default: LogLevel) -> LogLevel:
     value = environ.get(_ENV_PREFIX + key, default).strip().upper()
     if value not in _VALID_LOG_LEVELS:
-        raise ConfigurationError(
-            f"{_ENV_PREFIX}{key} must be one of {sorted(_VALID_LOG_LEVELS)}"
-        )
+        raise ConfigurationError(f"{_ENV_PREFIX}{key} must be one of {sorted(_VALID_LOG_LEVELS)}")
     return cast(LogLevel, value)
 
 

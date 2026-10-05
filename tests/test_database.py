@@ -9,8 +9,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
 import psycopg
+import pytest
 from psycopg import OperationalError
 
 from ja_pst_mcp import database as database_module
@@ -42,7 +42,7 @@ class FakeCursor:
         self.name: Any = None
         self.fetch_sizes: list[int] = []
 
-    async def __aenter__(self) -> "FakeCursor":
+    async def __aenter__(self) -> FakeCursor:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -59,7 +59,7 @@ class FakeCursor:
 
 
 class FakeTransaction:
-    async def __aenter__(self) -> "FakeTransaction":
+    async def __aenter__(self) -> FakeTransaction:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -81,7 +81,7 @@ class FakeConnection:
         self.cursor_instance.name = name
         return self.cursor_instance
 
-    async def __aenter__(self) -> "FakeConnection":
+    async def __aenter__(self) -> FakeConnection:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -166,9 +166,7 @@ def test_pool_is_configured_from_settings(pool_spy: PoolSpy) -> None:
 
 
 def test_pool_sizes_come_from_settings(pool_spy: PoolSpy) -> None:
-    settings = replace(
-        SETTINGS, pool_min_size=2, pool_max_size=9, pool_timeout_seconds=12
-    )
+    settings = replace(SETTINGS, pool_min_size=2, pool_max_size=9, pool_timeout_seconds=12)
 
     Database(settings)
 
@@ -238,9 +236,7 @@ async def test_ping_executes_select_one(pool_spy: PoolSpy) -> None:
     await database.ping()
 
     assert pool_spy.pool is not None
-    assert pool_spy.pool.connection_instance.cursor_instance.executed == [
-        ("SELECT 1", None)
-    ]
+    assert pool_spy.pool.connection_instance.cursor_instance.executed == [("SELECT 1", None)]
 
 
 async def test_async_context_manager_opens_and_closes(pool_spy: PoolSpy) -> None:
@@ -256,8 +252,7 @@ async def test_ping_wraps_driver_errors(pool_spy: PoolSpy) -> None:
     database = Database(SETTINGS)
     assert pool_spy.pool is not None
     driver_error = OperationalError(
-        'connection to server at "db.example" (10.0.0.1), port 5432 failed: '
-        "Connection refused"
+        'connection to server at "db.example" (10.0.0.1), port 5432 failed: Connection refused'
     )
     pool_spy.pool.connection_instance.cursor_instance.raise_on_execute = driver_error
 
@@ -386,9 +381,7 @@ async def test_fetch_rows_passes_named_params(pool_spy: PoolSpy) -> None:
 
     await database.fetch_rows("SELECT %(value)s AS n", {"value": 1})
 
-    assert connection.cursor_instance.executed == [
-        ("SELECT %(value)s AS n", {"value": 1})
-    ]
+    assert connection.cursor_instance.executed == [("SELECT %(value)s AS n", {"value": 1})]
 
 
 async def test_fetch_rows_serializes_special_values(pool_spy: PoolSpy) -> None:
@@ -401,15 +394,11 @@ async def test_fetch_rows_serializes_special_values(pool_spy: PoolSpy) -> None:
         SimpleNamespace(name="payload"),
         SimpleNamespace(name="n"),
     ]
-    connection.cursor_instance.rows = [
-        (date(2025, 1, 1), b"\x01\x02", {"a": [1, 2]}, None)
-    ]
+    connection.cursor_instance.rows = [(date(2025, 1, 1), b"\x01\x02", {"a": [1, 2]}, None)]
 
     result = await database.fetch_rows("SELECT d, b, payload, n FROM t")
 
-    assert result.rows == (
-        ("2025-01-01", "0102", {"a": [1, 2]}, None),
-    )
+    assert result.rows == (("2025-01-01", "0102", {"a": [1, 2]}, None),)
     assert result.row_count == 1
 
 

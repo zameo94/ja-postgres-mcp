@@ -89,9 +89,7 @@ async def _connect_writable(settings: DatabaseSettings) -> psycopg.AsyncConnecti
 async def _server_cursor_count(database: Database) -> int:
     async with database.connection() as connection:
         async with connection.cursor() as cursor:
-            await cursor.execute(
-                "SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'"
-            )
+            await cursor.execute("SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'")
             row = await cursor.fetchone()
     assert row is not None
     return row[0]
@@ -106,9 +104,7 @@ async def _server_cursor_counts(database: Database, count: int) -> list[int]:
     async def one() -> int:
         async with database.connection() as connection:
             async with connection.cursor() as cursor:
-                await cursor.execute(
-                    "SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'"
-                )
+                await cursor.execute("SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'")
                 row = await cursor.fetchone()
                 assert row is not None
                 return row[0]
@@ -121,9 +117,7 @@ async def probe_table(db_settings: DatabaseSettings) -> AsyncIterator[str]:
     connection = await _connect_writable(db_settings)
     try:
         await connection.execute(f"DROP TABLE IF EXISTS {PROBE_TABLE}")
-        await connection.execute(
-            f"CREATE TABLE {PROBE_TABLE} (id int PRIMARY KEY, note text)"
-        )
+        await connection.execute(f"CREATE TABLE {PROBE_TABLE} (id int PRIMARY KEY, note text)")
         await connection.execute(f"INSERT INTO {PROBE_TABLE} VALUES (1, 'original')")
         await connection.commit()
         yield PROBE_TABLE
@@ -136,14 +130,11 @@ async def probe_table(db_settings: DatabaseSettings) -> AsyncIterator[str]:
 
 
 @pytest.fixture
-async def probe_view(
-    db_settings: DatabaseSettings, probe_table: str
-) -> AsyncIterator[str]:
+async def probe_view(db_settings: DatabaseSettings, probe_table: str) -> AsyncIterator[str]:
     connection = await _connect_writable(db_settings)
     try:
         await connection.execute(
-            f"CREATE OR REPLACE VIEW {PROBE_VIEW} AS "
-            f"SELECT id, note FROM {probe_table}"
+            f"CREATE OR REPLACE VIEW {PROBE_VIEW} AS SELECT id, note FROM {probe_table}"
         )
         await connection.commit()
         yield PROBE_VIEW
@@ -156,22 +147,17 @@ async def probe_view(
 
 
 @pytest.fixture
-async def probe_matview(
-    db_settings: DatabaseSettings, probe_table: str
-) -> AsyncIterator[str]:
+async def probe_matview(db_settings: DatabaseSettings, probe_table: str) -> AsyncIterator[str]:
     connection = await _connect_writable(db_settings)
     try:
         await connection.execute(
-            f"CREATE MATERIALIZED VIEW {PROBE_MATVIEW} AS "
-            f"SELECT id, note FROM {probe_table}"
+            f"CREATE MATERIALIZED VIEW {PROBE_MATVIEW} AS SELECT id, note FROM {probe_table}"
         )
         await connection.commit()
         yield PROBE_MATVIEW
     finally:
         try:
-            await connection.execute(
-                f"DROP MATERIALIZED VIEW IF EXISTS {PROBE_MATVIEW}"
-            )
+            await connection.execute(f"DROP MATERIALIZED VIEW IF EXISTS {PROBE_MATVIEW}")
             await connection.commit()
         finally:
             await connection.close()
@@ -183,8 +169,7 @@ async def probe_partitioned(db_settings: DatabaseSettings) -> AsyncIterator[str]
     try:
         await connection.execute(f"DROP TABLE IF EXISTS {PROBE_PARTITIONED} CASCADE")
         await connection.execute(
-            f"CREATE TABLE {PROBE_PARTITIONED} (id int, note text) "
-            "PARTITION BY RANGE (id)"
+            f"CREATE TABLE {PROBE_PARTITIONED} (id int, note text) PARTITION BY RANGE (id)"
         )
         await connection.execute(
             f"CREATE TABLE {PROBE_PARTITION} PARTITION OF {PROBE_PARTITIONED} "
@@ -236,9 +221,7 @@ async def test_fetch_rows_allows_semicolons_in_literals(database: Database) -> N
 
 
 async def test_fetch_rows_empty_result_keeps_columns(database: Database) -> None:
-    result = await database.fetch_rows(
-        "SELECT 1 AS id, 'x'::text AS name WHERE false"
-    )
+    result = await database.fetch_rows("SELECT 1 AS id, 'x'::text AS name WHERE false")
 
     assert result.columns == ("id", "name")
     assert result.rows == ()
@@ -335,10 +318,7 @@ async def test_concurrent_queries_leave_pool_clean(
     await database.open()
     try:
         await asyncio.gather(
-            *[
-                database.fetch_rows("SELECT generate_series(1, 50) AS n")
-                for _ in range(6)
-            ]
+            *[database.fetch_rows("SELECT generate_series(1, 50) AS n") for _ in range(6)]
         )
 
         assert await _server_cursor_counts(database, 5) == [0, 0, 0, 0, 0]
@@ -392,9 +372,7 @@ async def test_write_operations_are_impossible(
         await database.fetch_rows(statement)
 
 
-async def test_write_attempts_leave_data_unchanged(
-    database: Database, probe_table: str
-) -> None:
+async def test_write_attempts_leave_data_unchanged(database: Database, probe_table: str) -> None:
     result = await database.fetch_rows(f"SELECT id, note FROM {probe_table}")
 
     assert result.rows == ((1, "original"),)
@@ -402,9 +380,7 @@ async def test_write_attempts_leave_data_unchanged(
 
 async def test_params_are_not_interpolated(database: Database, probe_table: str) -> None:
     payload = "1; DROP TABLE ja_pst_probe"
-    result = await database.fetch_rows(
-        "SELECT %(value)s AS v", {"value": payload}
-    )
+    result = await database.fetch_rows("SELECT %(value)s AS v", {"value": payload})
 
     assert result.rows == ((payload,),)
 
@@ -536,21 +512,15 @@ async def test_db_list_schemas_respects_least_privilege(
 async def test_db_list_tables_tool_end_to_end(
     db_settings: DatabaseSettings, probe_table: str
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_list_tables", {"schema": "public", "kind": "table"}
-        )
+        result = await client.call_tool("db_list_tables", {"schema": "public", "kind": "table"})
 
     tables = result.structured_content["tables"]
     assert any(table["name"] == probe_table for table in tables)
-    assert all(
-        table["schema_name"] == "public" and table["kind"] == "table" for table in tables
-    )
+    assert all(table["schema_name"] == "public" and table["kind"] == "table" for table in tables)
     assert result.structured_content["next_cursor"] is None
 
 
@@ -615,9 +585,7 @@ async def test_db_list_tables_rejects_cursor_from_other_scope(
         server = create_server(settings)
 
         async with Client(server, raise_exceptions=True) as client:
-            first = await client.call_tool(
-                "db_list_tables", {"schema": "public", "page_size": 1}
-            )
+            first = await client.call_tool("db_list_tables", {"schema": "public", "page_size": 1})
             cursor = first.structured_content["next_cursor"]
             assert cursor is not None
             mismatch = await client.call_tool(
@@ -637,9 +605,7 @@ async def test_db_list_tables_rejects_cursor_from_other_scope(
 async def test_db_list_tables_filters_by_kind(
     db_settings: DatabaseSettings, probe_table: str, probe_view: str
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -661,9 +627,7 @@ async def test_db_list_tables_filters_by_kind(
 async def test_db_describe_table_tool_end_to_end(
     db_settings: DatabaseSettings, probe_table: str
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -686,9 +650,7 @@ async def test_db_describe_table_tool_end_to_end(
 async def test_db_describe_table_resolves_schema(
     db_settings: DatabaseSettings, probe_table: str
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -700,26 +662,18 @@ async def test_db_describe_table_resolves_schema(
 async def test_db_describe_table_reports_missing_table(
     db_settings: DatabaseSettings,
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_describe_table", {"table": "ja_pst_does_not_exist"}
-        )
+        result = await client.call_tool("db_describe_table", {"table": "ja_pst_does_not_exist"})
 
     assert result.is_error is True
     assert "not found" in result.content[0].text
 
 
-async def test_db_describe_table_view(
-    db_settings: DatabaseSettings, probe_view: str
-) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+async def test_db_describe_table_view(db_settings: DatabaseSettings, probe_view: str) -> None:
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -733,12 +687,8 @@ async def test_db_describe_table_view(
     assert content["primary_key"] == []
 
 
-async def test_db_describe_table_matview(
-    db_settings: DatabaseSettings, probe_matview: str
-) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+async def test_db_describe_table_matview(db_settings: DatabaseSettings, probe_matview: str) -> None:
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -754,9 +704,7 @@ async def test_db_describe_table_matview(
 async def test_db_describe_table_partitioned(
     db_settings: DatabaseSettings, probe_partitioned: str
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -772,9 +720,7 @@ async def test_db_describe_table_partitioned(
 async def test_db_list_tables_excludes_system_schemas(
     db_settings: DatabaseSettings, probe_table: str
 ) -> None:
-    settings = Settings(
-        database=db_settings, server=ServerSettings(), query=QuerySettings()
-    )
+    settings = Settings(database=db_settings, server=ServerSettings(), query=QuerySettings())
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
@@ -816,9 +762,7 @@ async def test_db_run_read_only_query_reports_multiple_statements(
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_run_read_only_query", {"sql": "SELECT 1; SELECT 2"}
-        )
+        result = await client.call_tool("db_run_read_only_query", {"sql": "SELECT 1; SELECT 2"})
 
     assert result.is_error is True
     assert "only a single statement is allowed" in result.content[0].text
@@ -853,9 +797,7 @@ async def probe_graph(db_settings: DatabaseSettings) -> AsyncIterator[None]:
             "CREATE TABLE ja_pst_child (id int PRIMARY KEY, "
             "parent_id int REFERENCES ja_pst_parent(id), note text CHECK (note <> ''))"
         )
-        await connection.execute(
-            "CREATE INDEX ja_pst_child_note_idx ON ja_pst_child (note)"
-        )
+        await connection.execute("CREATE INDEX ja_pst_child_note_idx ON ja_pst_child (note)")
         await connection.execute(
             "CREATE VIEW ja_pst_child_view AS SELECT id, note FROM ja_pst_child"
         )
@@ -877,9 +819,7 @@ def _settings(db_settings: DatabaseSettings, **query: object) -> Settings:
     )
 
 
-async def test_db_list_constraints_tool(
-    db_settings: DatabaseSettings, probe_graph: None
-) -> None:
+async def test_db_list_constraints_tool(db_settings: DatabaseSettings, probe_graph: None) -> None:
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
@@ -897,9 +837,7 @@ async def test_db_list_constraints_reports_unique(
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_list_constraints", {"table": "ja_pst_parent"}
-        )
+        result = await client.call_tool("db_list_constraints", {"table": "ja_pst_parent"})
 
     kinds = {constraint["kind"] for constraint in result.structured_content["constraints"]}
     assert "unique" in kinds
@@ -913,16 +851,13 @@ async def test_db_list_constraints_skips_partition_clones(
     try:
         await connection.execute("DROP TABLE IF EXISTS ja_pst_part CASCADE")
         await connection.execute(
-            "CREATE TABLE ja_pst_part (id int PRIMARY KEY, note text) "
-            "PARTITION BY RANGE (id)"
+            "CREATE TABLE ja_pst_part (id int PRIMARY KEY, note text) PARTITION BY RANGE (id)"
         )
         await connection.execute(
-            "CREATE TABLE ja_pst_part_p1 PARTITION OF ja_pst_part "
-            "FOR VALUES FROM (0) TO (100)"
+            "CREATE TABLE ja_pst_part_p1 PARTITION OF ja_pst_part FOR VALUES FROM (0) TO (100)"
         )
         await connection.execute(
-            "CREATE TABLE ja_pst_part_p2 PARTITION OF ja_pst_part "
-            "FOR VALUES FROM (100) TO (200)"
+            "CREATE TABLE ja_pst_part_p2 PARTITION OF ja_pst_part FOR VALUES FROM (100) TO (200)"
         )
         await connection.commit()
 
@@ -941,32 +876,24 @@ async def test_db_list_constraints_skips_partition_clones(
         await connection.close()
 
 
-async def test_db_list_relationships_tool(
-    db_settings: DatabaseSettings, probe_graph: None
-) -> None:
+async def test_db_list_relationships_tool(db_settings: DatabaseSettings, probe_graph: None) -> None:
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_list_relationships", {"table": "ja_pst_child"}
-        )
+        result = await client.call_tool("db_list_relationships", {"table": "ja_pst_child"})
 
     relationships = result.structured_content["relationships"]
     assert any(item["target_table"] == "ja_pst_parent" for item in relationships)
 
 
-async def test_db_list_indexes_tool(
-    db_settings: DatabaseSettings, probe_graph: None
-) -> None:
+async def test_db_list_indexes_tool(db_settings: DatabaseSettings, probe_graph: None) -> None:
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_list_indexes", {"table": "ja_pst_child"})
 
     indexes = result.structured_content["indexes"]
-    note_index = next(
-        item for item in indexes if item["name"] == "ja_pst_child_note_idx"
-    )
+    note_index = next(item for item in indexes if item["name"] == "ja_pst_child_note_idx")
     assert note_index["columns"] == ["note"]
     assert note_index["method"] == "btree"
 
@@ -986,14 +913,11 @@ async def test_db_get_view_definition_tool(
     assert "ja_pst_child" in result.structured_content["definition"]
 
 
-async def test_db_preview_table_tool(
-    db_settings: DatabaseSettings, probe_graph: None
-) -> None:
+async def test_db_preview_table_tool(db_settings: DatabaseSettings, probe_graph: None) -> None:
     connection = await _connect_writable(db_settings)
     try:
         await connection.execute(
-            "INSERT INTO ja_pst_child (id, parent_id, note) "
-            "VALUES (1, NULL, 'a'), (2, NULL, 'b')"
+            "INSERT INTO ja_pst_child (id, parent_id, note) VALUES (1, NULL, 'a'), (2, NULL, 'b')"
         )
         await connection.commit()
     finally:
@@ -1066,12 +990,8 @@ async def test_db_preview_table_traverses_pages_with_bool_pk(
 ) -> None:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute(
-            "CREATE TABLE ja_pst_bool_pk (flag bool PRIMARY KEY, note text)"
-        )
-        await connection.execute(
-            "INSERT INTO ja_pst_bool_pk VALUES (false, 'f'), (true, 't')"
-        )
+        await connection.execute("CREATE TABLE ja_pst_bool_pk (flag bool PRIMARY KEY, note text)")
+        await connection.execute("INSERT INTO ja_pst_bool_pk VALUES (false, 'f'), (true, 't')")
         await connection.commit()
 
         server = create_server(
