@@ -26,6 +26,7 @@ from ja_pst_mcp.server import create_server
 pytestmark = pytest.mark.integration
 
 PROBE_TABLE = "ja_pst_probe"
+PROBE_VIEW = "ja_pst_probe_view"
 
 # Statements that must be impossible through the tool.
 WRITE_AND_DDL_STATEMENTS = [
@@ -124,6 +125,26 @@ async def probe_table(db_settings: DatabaseSettings) -> AsyncIterator[str]:
     finally:
         try:
             await connection.execute(f"DROP TABLE IF EXISTS {PROBE_TABLE}")
+            await connection.commit()
+        finally:
+            await connection.close()
+
+
+@pytest.fixture
+async def probe_view(
+    db_settings: DatabaseSettings, probe_table: str
+) -> AsyncIterator[str]:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute(
+            f"CREATE OR REPLACE VIEW {PROBE_VIEW} AS "
+            f"SELECT id, note FROM {probe_table}"
+        )
+        await connection.commit()
+        yield PROBE_VIEW
+    finally:
+        try:
+            await connection.execute(f"DROP VIEW IF EXISTS {PROBE_VIEW}")
             await connection.commit()
         finally:
             await connection.close()
@@ -415,6 +436,87 @@ async def test_db_list_schemas_respects_least_privilege(
     names = [schema["name"] for schema in result.structured_content["schemas"]]
     assert "ja_pst_sales" in names
     assert "ja_pst_hidden" not in names
+
+
+async def test_db_list_tables_tool_end_to_end(
+    db_settings: DatabaseSettings, probe_table: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_list_tables", {"schema": "public", "kind": "table"}
+        )
+
+    tables = result.structured_content["tables"]
+    assert any(table["name"] == probe_table for table in tables)
+    assert all(
+        table["schema_name"] == "public" and table["kind"] == "table" for table in tables
+    )
+    assert result.structured_content["truncated"] is False
+
+
+async def test_db_list_tables_filters_by_kind(
+    db_settings: DatabaseSettings, probe_table: str, probe_view: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        tables_result = await client.call_tool(
+            "db_list_tables", {"schema": "public", "kind": "table"}
+        )
+        views_result = await client.call_tool(
+            "db_list_tables", {"schema": "public", "kind": "view"}
+        )
+
+    table_names = [table["name"] for table in tables_result.structured_content["tables"]]
+    view_names = [table["name"] for table in views_result.structured_content["tables"]]
+    assert probe_table in table_names
+    assert probe_view not in table_names
+    assert probe_view in view_names
+    assert probe_table not in view_names
+
+
+async def test_db_list_tables_excludes_system_schemas(
+    db_settings: DatabaseSettings, probe_table: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_tables", {})
+
+    tables = result.structured_content["tables"]
+    assert any(table["name"] == probe_table for table in tables)
+    schemas = {table["schema_name"] for table in tables}
+    assert "information_schema" not in schemas
+    assert not any(schema.startswith("pg_") for schema in schemas)
+
+
+async def test_db_list_tables_respects_allowlist(
+    db_settings: DatabaseSettings, probe_table: str
+) -> None:
+    settings = Settings(
+        database=db_settings,
+        server=ServerSettings(),
+        query=QuerySettings(allowed_schemas=("public",)),
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_tables", {})
+
+    tables = result.structured_content["tables"]
+    assert any(table["name"] == probe_table for table in tables)
+    assert all(table["schema_name"] == "public" for table in tables)
 
 
 async def test_db_run_read_only_query_reports_multiple_statements(

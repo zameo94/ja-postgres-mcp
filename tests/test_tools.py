@@ -16,7 +16,7 @@ from ja_pst_mcp.database import (
     InvalidQueryError,
     QueryResult,
 )
-from ja_pst_mcp.discovery import build_list_schemas_query
+from ja_pst_mcp.discovery import build_list_schemas_query, build_list_tables_query
 from ja_pst_mcp.server import create_server
 from ja_pst_mcp.tools import (
     DATABASE_OPERATION_MESSAGE,
@@ -308,3 +308,113 @@ async def test_db_list_schemas_passes_allowlist(settings: Settings) -> None:
     query, params = created["database"].calls[0]
     assert "= ANY(%s)" in query
     assert params == [["public"]]
+
+
+def test_build_list_tables_query_without_filters() -> None:
+    query, params = build_list_tables_query(())
+
+    assert params is None
+    assert "%s" not in query
+
+
+def test_build_list_tables_query_binds_filters() -> None:
+    query, params = build_list_tables_query(
+        ("public",), schema="public", kind="table"
+    )
+
+    assert params == [["public"], "public", ["r", "p"]]
+    assert query.count("%s") == 3
+
+
+async def test_db_list_tables_returns_tables(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        columns=("schema_name", "name", "kind", "estimated_rows"),
+        rows=(
+            ("public", "customers", "table", 42),
+            ("public", "orders", "table", None),
+        ),
+        row_count=2,
+        truncated=False,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        listing = await client.list_tools()
+        tool = next(item for item in listing.tools if item.name == "db_list_tables")
+        assert tool.title == "List tables"
+        assert tool.annotations is not None
+        assert tool.annotations.read_only_hint is True
+
+        result = await client.call_tool("db_list_tables", {})
+
+    assert result.is_error is False
+    assert result.structured_content == {
+        "tables": [
+            {
+                "schema_name": "public",
+                "name": "customers",
+                "kind": "table",
+                "estimated_rows": 42,
+            },
+            {
+                "schema_name": "public",
+                "name": "orders",
+                "kind": "table",
+                "estimated_rows": None,
+            },
+        ],
+        "truncated": False,
+    }
+
+
+async def test_db_list_tables_maps_database_error(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    server = create_server(
+        settings,
+        database_factory=make_factory(created, query_error=DatabaseError("boom")),
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_tables", {})
+
+    assert result.is_error is True
+    assert DATABASE_OPERATION_MESSAGE in result.content[0].text
+    assert "boom" not in result.content[0].text
+
+
+async def test_db_list_tables_does_not_mask_unexpected_errors(
+    settings: Settings,
+) -> None:
+    created: dict[str, FakeDatabase] = {}
+    server = create_server(
+        settings,
+        database_factory=make_factory(
+            created,
+            query_error=OperationalError('connection to server at "db.example" failed'),
+        ),
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_tables", {})
+
+    assert result.is_error is True
+    assert result.content[0].text == "Error executing tool db_list_tables"
+    assert "db.example" not in result.content[0].text
+
+
+async def test_db_list_tables_rejects_schema_outside_allowlist(
+    settings: Settings,
+) -> None:
+    created: dict[str, FakeDatabase] = {}
+    configured = replace(settings, query=QuerySettings(allowed_schemas=("public",)))
+    server = create_server(configured, database_factory=make_factory(created))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_tables", {"schema": "sales"})
+
+    assert result.is_error is True
+    assert "not in the allowed schemas" in result.content[0].text
+    assert created["database"].calls == []
