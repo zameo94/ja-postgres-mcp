@@ -7,6 +7,7 @@ the test session, so these tests always run (Docker is required).
 from __future__ import annotations
 
 import asyncio
+import pathlib
 from collections.abc import AsyncIterator
 
 import psycopg
@@ -1089,3 +1090,99 @@ async def test_db_preview_table_quotes_identifiers_end_to_end(
         await connection.execute('DROP TABLE IF EXISTS "Weird Table"')
         await connection.commit()
         await connection.close()
+
+
+@pytest.fixture(scope="session")
+def demo_seed(postgres_container) -> None:
+    seed = pathlib.Path("db/demo/seed.sql").read_text(encoding="utf-8")
+    with psycopg.connect(
+        host=postgres_container.get_container_host_ip(),
+        port=postgres_container.get_exposed_port(5432),
+        dbname=postgres_container.dbname,
+        user=postgres_container.username,
+        password=postgres_container.password,
+        autocommit=True,
+    ) as connection:
+        connection.execute(seed)
+
+
+async def test_demo_seed_supports_business_query(
+    db_settings: DatabaseSettings, demo_seed: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_run_read_only_query",
+            {"sql": "SELECT count(*) AS overdue FROM demo.orders WHERE status = 'pending'"},
+        )
+
+    assert result.is_error is False
+    assert result.structured_content["rows"][0][0] == 60
+
+
+async def test_demo_seed_discovery(db_settings: DatabaseSettings, demo_seed: None) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        tables = (await client.call_tool("db_list_tables", {"schema": "demo"})).structured_content[
+            "tables"
+        ]
+        relationships = (
+            await client.call_tool("db_list_relationships", {"schema": "demo"})
+        ).structured_content["relationships"]
+
+    names = {table["name"] for table in tables}
+    assert {"customers", "products", "orders", "order_items", "payments"}.issubset(names)
+    assert any(
+        item["source_table"] == "orders" and item["target_table"] == "customers"
+        for item in relationships
+    )
+
+
+async def test_demo_seed_view_definition(db_settings: DatabaseSettings, demo_seed: None) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_get_view_definition", {"view": "monthly_revenue", "schema": "demo"}
+        )
+
+    assert result.structured_content["kind"] == "view"
+    assert "payments" in result.structured_content["definition"]
+
+
+async def test_demo_seed_prices_are_coherent(
+    db_settings: DatabaseSettings, demo_seed: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    violations = [
+        # The payment must equal the order total.
+        """SELECT o.id
+           FROM demo.orders AS o
+           JOIN demo.order_items AS oi ON oi.order_id = o.id
+           JOIN demo.payments AS p ON p.order_id = o.id
+           GROUP BY o.id, p.amount
+           HAVING sum(oi.quantity * oi.unit_price) <> p.amount""",
+        # The line price must equal the catalogue price.
+        """SELECT oi.id
+           FROM demo.order_items AS oi
+           JOIN demo.products AS p ON p.id = oi.product_id
+           WHERE oi.unit_price <> p.unit_price""",
+        # An order must contain more than one distinct product, otherwise the
+        # generator is degenerate and order_items carries no information.
+        """SELECT order_id
+           FROM demo.order_items
+           GROUP BY order_id
+           HAVING count(DISTINCT product_id) < 2""",
+    ]
+
+    async with Client(server, raise_exceptions=True) as client:
+        results = [
+            await client.call_tool("db_run_read_only_query", {"sql": sql}) for sql in violations
+        ]
+
+    for sql, result in zip(violations, results, strict=True):
+        assert result.is_error is False, sql
+        assert result.structured_content["rows"] == [], sql
