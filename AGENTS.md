@@ -224,11 +224,6 @@ application authentication or `/api/...` endpoints — those belong to
 ## Commands
 
 ```
-# With uv
-uv sync
-uv run pytest
-
-# With Poetry
 poetry install
 poetry run pytest
 
@@ -258,6 +253,7 @@ pyproject.toml     # project + tooling config
 
 ## Conventions
 
+- **Poetry** is the developer's package manager (`poetry install`, `poetry run ...`).
 - Python 3.12, type hints, small functions, single responsibilities.
 - Modern SPDX license header not required in source files.
 - Keep runtime dependencies minimal; add a dependency only in the step that uses it.

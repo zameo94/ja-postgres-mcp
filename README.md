@@ -6,13 +6,16 @@ control.
 
 A **generic PostgreSQL MCP server**. `pst` stands for PostgreSQL: this is not a
 vertical (no legal/BI/CRM domain baked in). It connects to an **arbitrary,
-already existing** PostgreSQL database, discovers its schema at runtime and lets
-a model answer real business questions with **read-only** SQL.
+already existing PostgreSQL 15+** database, discovers its schema at runtime and
+lets a model answer real business questions with **read-only** SQL.
 
 The **database is the domain**: tables, columns, constraints and data are
 discovered at runtime and never hardcoded. The server is consumed by the separate
 `ja-pst-mcp-client` application over MCP.
 
+> **PostgreSQL 15 or newer.** The server targets PostgreSQL 15+; its SQL and
+> catalog queries are compatible with version 15 and later.
+>
 > **MVP.** The goal is a solid, verifiable foundation, not a complete platform.
 > Some capabilities are intentionally out of scope (see
 > [MVP limitations](#mvp-limitations)). Every behavior is covered by tests.
@@ -65,8 +68,9 @@ it never creates database roles.
 
 ## First run
 
-Requirements: **Docker** and Docker Compose. To run the tests you also need
-Docker (the integration tests start a throwaway PostgreSQL).
+Requirements: **Docker** and Docker Compose; the target database must be
+**PostgreSQL 15 or newer**. To run the tests you also need Docker (the
+integration tests start a throwaway PostgreSQL 15).
 
 ```sh
 cp .env.example .env
@@ -102,8 +106,8 @@ re-seed from scratch, remove the `ja_pst_mcp_postgres_volume` volume.
 ### Local development (server outside Docker)
 
 ```sh
-uv sync            # or: poetry install
-uv run pytest      # integration tests provision PostgreSQL 15 via testcontainers
+poetry install
+poetry run pytest   # integration tests provision PostgreSQL 15 via testcontainers
 ```
 
 ---
@@ -346,7 +350,7 @@ Discovery always excludes system schemas (`pg_catalog`, `information_schema`,
 ## Tests
 
 ```sh
-uv run pytest        # or: poetry run pytest
+poetry run pytest
 ```
 
 Unit and integration tests run together. The integration tests start a
@@ -357,9 +361,9 @@ needed.
 Static checks:
 
 ```sh
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy            # checks src/ only
+poetry run ruff check .
+poetry run ruff format --check .
+poetry run mypy            # checks src/ only
 ```
 
 ---
