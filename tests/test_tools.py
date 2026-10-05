@@ -19,8 +19,14 @@ from ja_pst_mcp.database import (
 )
 from ja_pst_mcp.discovery import (
     build_describe_columns_query,
+    build_get_view_definition_query,
+    build_list_constraints_query,
+    build_list_indexes_query,
+    build_list_relationships_query,
     build_list_schemas_query,
     build_list_tables_query,
+    build_preview_resolve_query,
+    build_preview_rows_query,
     build_resolve_table_query,
 )
 from ja_pst_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
@@ -750,3 +756,288 @@ async def test_db_describe_table_maps_error_on_second_query(
 
     assert result.is_error is True
     assert DATABASE_OPERATION_MESSAGE in result.content[0].text
+
+
+def test_build_list_constraints_query_binds_filters_and_cursor() -> None:
+    query, params = build_list_constraints_query(
+        ("public",), 200, schema="public", table="t", cursor=("public", "t", "c")
+    )
+
+    assert params == [["public"], "public", "t", "public", "t", "c", 201]
+    assert query.count("%s") == 7
+
+
+def test_build_list_relationships_query_binds_filters_and_cursor() -> None:
+    query, params = build_list_relationships_query(
+        (), 50, schema="public", cursor=("public", "t", "fk")
+    )
+
+    assert params == ["public", "public", "t", "fk", 51]
+
+
+def test_build_list_indexes_query_binds_filters_and_cursor() -> None:
+    query, params = build_list_indexes_query(
+        (), 50, table="t", cursor=("public", "t", "idx")
+    )
+
+    assert params == ["t", "public", "t", "idx", 51]
+
+
+def test_build_get_view_definition_query_binds_filters() -> None:
+    query, params = build_get_view_definition_query(("public",), "v", "public")
+
+    assert params == ["v", "public", ["public"]]
+
+
+def test_build_preview_resolve_query_binds_filters() -> None:
+    query, params = build_preview_resolve_query(("public",), "t", "public")
+
+    assert params == ["t", "public", ["public"]]
+
+
+def test_build_preview_rows_query_orders_by_pk_text() -> None:
+    query, params = build_preview_rows_query("public", "t", ("id",), 200)
+
+    assert params == [201]
+    assert query == (
+        'SELECT "id"::text AS "__pk_0", * FROM "public"."t" '
+        'ORDER BY "id"::text LIMIT %s'
+    )
+
+
+def test_build_preview_rows_query_binds_keyset() -> None:
+    query, params = build_preview_rows_query("public", "t", ("id",), 10, ("5",))
+
+    assert params == ["5", 11]
+    assert 'WHERE ("id"::text) > (%s)' in query
+
+
+def test_build_preview_rows_query_quotes_identifiers() -> None:
+    query, _ = build_preview_rows_query("weird", 'ta"ble', ("i d",), 10)
+
+    assert '"weird"."ta""ble"' in query
+    assert '"i d"::text' in query
+
+
+async def test_db_list_constraints_returns_constraints(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        ("schema_name", "table_name", "name", "kind", "definition"),
+        (("public", "child", "child_pkey", "primary_key", "PRIMARY KEY (id)"),),
+        1,
+        False,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_constraints", {"table": "child"})
+
+    assert result.structured_content == {
+        "constraints": [
+            {
+                "schema_name": "public",
+                "table_name": "child",
+                "name": "child_pkey",
+                "kind": "primary_key",
+                "definition": "PRIMARY KEY (id)",
+            }
+        ],
+        "next_cursor": None,
+        "row_count": 1,
+    }
+
+
+async def test_db_list_relationships_returns_relationships(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        (
+            "name",
+            "source_schema",
+            "source_table",
+            "target_schema",
+            "target_table",
+            "definition",
+        ),
+        (
+            (
+                "fk",
+                "public",
+                "child",
+                "public",
+                "parent",
+                "FOREIGN KEY (parent_id) REFERENCES parent(id)",
+            ),
+        ),
+        1,
+        False,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_relationships", {})
+
+    content = result.structured_content
+    assert content["relationships"][0]["target_table"] == "parent"
+    assert content["next_cursor"] is None
+
+
+async def test_db_list_indexes_returns_indexes(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        (
+            "schema_name",
+            "table_name",
+            "name",
+            "method",
+            "is_unique",
+            "is_primary",
+            "columns",
+            "definition",
+        ),
+        (
+            (
+                "public",
+                "child",
+                "idx",
+                "btree",
+                False,
+                False,
+                ["note"],
+                "CREATE INDEX idx ON public.child USING btree (note)",
+            ),
+        ),
+        1,
+        False,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_indexes", {})
+
+    content = result.structured_content
+    assert content["indexes"][0]["columns"] == ["note"]
+    assert content["indexes"][0]["method"] == "btree"
+
+
+async def test_db_get_view_definition_returns_definition(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        ("schema_name", "name", "kind", "definition"),
+        (("public", "v", "view", "SELECT 1;"),),
+        1,
+        False,
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_get_view_definition", {"view": "v"})
+
+    assert result.structured_content == {
+        "schema_name": "public",
+        "name": "v",
+        "kind": "view",
+        "definition": "SELECT 1;",
+    }
+
+
+async def test_db_get_view_definition_reports_missing(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    query_result = QueryResult(
+        ("schema_name", "name", "kind", "definition"), (), 0, False
+    )
+    server = create_server(
+        settings, database_factory=make_factory(created, query_result=query_result)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_get_view_definition", {"view": "v"})
+
+    assert result.is_error is True
+    assert "not found" in result.content[0].text
+
+
+async def test_db_preview_table_returns_rows(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    results = [
+        QueryResult(
+            ("schema_name", "name", "kind", "pk_columns"),
+            (("public", "t", "table", ["id"]),),
+            1,
+            False,
+        ),
+        QueryResult(("__pk_0", "id", "note"), (("1", 1, "a"),), 1, False),
+    ]
+    server = create_server(
+        settings, database_factory=make_factory(created, query_results=results)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_preview_table", {"table": "t"})
+
+    assert result.structured_content == {
+        "columns": ["id", "note"],
+        "rows": [[1, "a"]],
+        "next_cursor": None,
+        "row_count": 1,
+    }
+
+
+async def test_db_preview_table_requires_primary_key(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    results = [
+        QueryResult(
+            ("schema_name", "name", "kind", "pk_columns"),
+            (("public", "t", "table", []),),
+            1,
+            False,
+        )
+    ]
+    server = create_server(
+        settings, database_factory=make_factory(created, query_results=results)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_preview_table", {"table": "t"})
+
+    assert result.is_error is True
+    assert "primary key" in result.content[0].text
+
+
+async def test_db_preview_table_paginates(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    configured = replace(
+        settings,
+        query=QuerySettings(discovery_page_size=1, discovery_max_page_size=10),
+    )
+    results = [
+        QueryResult(
+            ("schema_name", "name", "kind", "pk_columns"),
+            (("public", "t", "table", ["id"]),),
+            1,
+            False,
+        ),
+        QueryResult(("__pk_0", "id", "note"), (("1", 1, "a"), ("2", 2, "b")), 2, False),
+    ]
+    server = create_server(
+        configured, database_factory=make_factory(created, query_results=results)
+    )
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_preview_table", {"table": "t"})
+
+    content = result.structured_content
+    assert content["rows"] == [[1, "a"]]
+    assert content["row_count"] == 1
+    assert decode_cursor(
+        content["next_cursor"],
+        1,
+        cursor_scope("db_preview_table", {"schema": "public", "table": "t"}),
+    ) == ("1",)
