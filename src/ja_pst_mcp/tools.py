@@ -11,6 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 
+from ja_pst_mcp.config import MAX_DISCOVERY_PAGE_SIZE, QuerySettings
 from ja_pst_mcp.context import AppContext
 from ja_pst_mcp.database import (
     AmbiguousTableError,
@@ -33,6 +34,7 @@ from ja_pst_mcp.discovery import (
     build_list_tables_query,
     build_resolve_table_query,
 )
+from ja_pst_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,8 @@ DATABASE_UNAVAILABLE_MESSAGE = "The database is currently unavailable."
 DATABASE_OPERATION_MESSAGE = "The database operation failed."
 
 _READ_ONLY_ANNOTATIONS = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+# PostgreSQL allows at most 1600 columns per relation; this is comfortably above.
+_DESCRIBE_MAX_COLUMNS = 2000
 
 _DB_HEALTH_DESCRIPTION = "Check that the server can reach PostgreSQL (read-only)."
 _DB_RUN_QUERY_DESCRIPTION = (
@@ -48,19 +52,20 @@ _DB_RUN_QUERY_DESCRIPTION = (
 )
 _DB_LIST_SCHEMAS_DESCRIPTION = (
     "List database schemas visible to the server, excluding system schemas "
-    "(read-only)."
+    "(read-only). Paginated: pass next_cursor back to fetch the next page; "
+    "next_cursor is null on the last page."
 )
 _DB_LIST_TABLES_DESCRIPTION = (
     "List tables, views, materialized views and foreign tables, excluding system "
-    "schemas (read-only). estimated_rows is planner statistics from the last "
-    "ANALYZE: it can be stale and is null when the relation was never analyzed."
+    "schemas (read-only). Paginated via next_cursor. estimated_rows is planner "
+    "statistics from the last ANALYZE: it can be stale and is null when the "
+    "relation was never analyzed."
 )
 _DB_DESCRIBE_TABLE_DESCRIPTION = (
     "Describe a table or view: columns (type, nullability, default, comment, "
     "primary-key flag), kind and primary key (read-only). attnum is PostgreSQL's "
     "column number (gaps after dropped columns). Resolves the relation by name; "
-    "if the name exists in several schemas, specify schema. primary_key is null "
-    "when the column list was truncated."
+    "if the name exists in several schemas, specify schema."
 )
 
 
@@ -89,6 +94,14 @@ def _tool_error(tool_name: str, exc: DatabaseError) -> ToolError:
 def _ensure_schema_allowed(schema: str, allowed_schemas: tuple[str, ...]) -> None:
     if allowed_schemas and schema not in allowed_schemas:
         raise InvalidQueryError(f"schema {schema!r} is not in the allowed schemas")
+
+
+def _resolve_page_size(requested: int | None, settings: QuerySettings) -> int:
+    max_page = min(settings.discovery_max_page_size, MAX_DISCOVERY_PAGE_SIZE)
+    page_size = settings.discovery_page_size if requested is None else requested
+    if page_size < 1 or page_size > max_page:
+        raise InvalidQueryError(f"page_size must be between 1 and {max_page}")
+    return page_size
 
 
 async def db_health(ctx: Context[AppContext]) -> dict[str, str]:
@@ -120,17 +133,30 @@ async def db_run_read_only_query(
     )
 
 
-async def db_list_schemas(ctx: Context[AppContext]) -> SchemaListOutput:
-    """List database schemas visible to the server (read-only)."""
+async def db_list_schemas(
+    ctx: Context[AppContext],
+    page_size: int | None = None,
+    cursor: str | None = None,
+) -> SchemaListOutput:
+    """List database schemas visible to the server (read-only, paginated)."""
     context = ctx.request_context.lifespan_context
-    query, params = build_list_schemas_query(context.query.allowed_schemas)
+    page = _resolve_page_size(page_size, context.query)
+    scope = cursor_scope("db_list_schemas", {})
+    key = decode_cursor(cursor, 1, scope) if cursor is not None else None
     try:
-        result = await context.database.fetch_rows(query, params)
+        query, params = build_list_schemas_query(
+            context.query.allowed_schemas, page, key
+        )
+        result = await context.database.fetch_rows(query, params, max_rows=page + 1)
     except DatabaseError as exc:
         raise _tool_error("db_list_schemas", exc) from exc
+
+    schemas = _schema_infos(result)
+    has_more = len(schemas) > page
+    items = schemas[:page]
+    next_cursor = encode_cursor((items[-1].name,), scope) if has_more else None
     return SchemaListOutput(
-        schemas=_schema_infos(result),
-        truncated=result.truncated,
+        schemas=items, next_cursor=next_cursor, row_count=len(items)
     )
 
 
@@ -144,19 +170,33 @@ async def db_list_tables(
     ctx: Context[AppContext],
     schema: str | None = None,
     kind: TableKind | None = None,
+    page_size: int | None = None,
+    cursor: str | None = None,
 ) -> TableListOutput:
-    """List tables, views, materialized views and foreign tables (read-only)."""
+    """List tables, views, materialized views and foreign tables (paginated)."""
     context = ctx.request_context.lifespan_context
+    page = _resolve_page_size(page_size, context.query)
+    if schema is not None:
+        _ensure_schema_allowed(schema, context.query.allowed_schemas)
+    scope = cursor_scope("db_list_tables", {"schema": schema, "kind": kind})
+    key = decode_cursor(cursor, 2, scope) if cursor is not None else None
     try:
-        if schema is not None:
-            _ensure_schema_allowed(schema, context.query.allowed_schemas)
         query, params = build_list_tables_query(
-            context.query.allowed_schemas, schema, kind
+            context.query.allowed_schemas, page, schema=schema, kind=kind, cursor=key
         )
-        result = await context.database.fetch_rows(query, params)
+        result = await context.database.fetch_rows(query, params, max_rows=page + 1)
     except DatabaseError as exc:
         raise _tool_error("db_list_tables", exc) from exc
-    return TableListOutput(tables=_table_infos(result), truncated=result.truncated)
+
+    tables = _table_infos(result)
+    has_more = len(tables) > page
+    items = tables[:page]
+    next_cursor = (
+        encode_cursor((items[-1].schema_name, items[-1].name), scope)
+        if has_more
+        else None
+    )
+    return TableListOutput(tables=items, next_cursor=next_cursor, row_count=len(items))
 
 
 def _table_infos(result: QueryResult) -> list[TableInfo]:
@@ -180,9 +220,9 @@ async def db_describe_table(
 ) -> DescribeTableOutput:
     """Describe a table or view (columns, types, nullability, defaults, PK)."""
     context = ctx.request_context.lifespan_context
+    if schema is not None:
+        _ensure_schema_allowed(schema, context.query.allowed_schemas)
     try:
-        if schema is not None:
-            _ensure_schema_allowed(schema, context.query.allowed_schemas)
         resolve_query, resolve_params = build_resolve_table_query(
             context.query.allowed_schemas, table, schema
         )
@@ -190,26 +230,22 @@ async def db_describe_table(
         schema_name, name, kind = _resolved_relation(table, resolved)
         columns_query, columns_params = build_describe_columns_query(schema_name, name)
         columns_result = await context.database.fetch_rows(
-            columns_query, columns_params
+            columns_query, columns_params, max_rows=_DESCRIBE_MAX_COLUMNS
         )
+        if columns_result.truncated:
+            raise InvalidQueryError("relation has too many columns to describe")
         if columns_result.row_count == 0:
             raise TableNotFoundError(f"table {schema_name}.{name} not found")
     except DatabaseError as exc:
         raise _tool_error("db_describe_table", exc) from exc
 
     columns = _column_infos(columns_result)
-    primary_key = (
-        None
-        if columns_result.truncated
-        else [column.name for column in columns if column.is_primary_key]
-    )
     return DescribeTableOutput(
         schema_name=schema_name,
         name=name,
         kind=kind,
         columns=columns,
-        primary_key=primary_key,
-        truncated=columns_result.truncated,
+        primary_key=[column.name for column in columns if column.is_primary_key],
     )
 
 

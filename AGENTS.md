@@ -50,6 +50,8 @@ application authentication or `/api/...` endpoints — those belong to
 ### Read-only query policy (MVP defaults)
 
 - `JA_PST_MAX_ROWS=200`, `JA_PST_STATEMENT_TIMEOUT=5`, `JA_PST_LOCK_TIMEOUT=5`.
+- Discovery pagination: `JA_PST_DISCOVERY_PAGE_SIZE=200`,
+  `JA_PST_DISCOVERY_MAX_PAGE_SIZE=1000`.
 - `JA_PST_ALLOWED_SCHEMAS` is optional and consumed by the **discovery** tools
   (schema/table listing); arbitrary read-only queries are not filtered by it.
   Discovery excludes system schemas (`pg_catalog`, `information_schema`,
@@ -88,22 +90,40 @@ application authentication or `/api/...` endpoints — those belong to
 - Serialization contract (see `QueryResult` docstring): `str`/`int`/`float`/
   `bool`/`null` pass through; `json`/`jsonb` → `dict`/`list`; `bytes` → hex;
   `Decimal` → `str` (exactness); `date`/`datetime` → ISO 8601; other → `str`.
-- Four distinct concerns, kept separate:
-  - **safety limit** — `max_rows` + `truncated`;
-  - **DB/result streaming** — server-side cursor fetches rows in batches from
-    the server (bounded client memory); closing the cursor releases the portal;
-  - **pagination** — not exposed for arbitrary SQL; the model writes
-    `LIMIT`/`OFFSET` itself;
-  - **transport streaming** — MCP returns one tool result; no row streaming and
-    no custom SSE. `Context.report_progress` is the only progress channel.
+- **Two distinct result contracts**, never mixed:
+  - **generic SQL** (`db_run_read_only_query`): `max_rows` + `truncated` — a
+    safety-bounded result. The model writes `LIMIT`/`OFFSET` itself; the server
+    does not rewrite arbitrary SQL.
+  - **discovery** (`db_list_*`): **mandatory keyset pagination** via
+    `page_size` + opaque `cursor`; output is the tool's item list (`schemas`,
+    `tables`, ...) plus `row_count` (items in this page) and `next_cursor`.
+    No `all`, no `truncated`. The consumer must request page after page.
+- Discovery pagination rules:
+  - stable, deterministic ordering (keyset); **no OFFSET**;
+  - `page_size` bounded by a hard maximum (`JA_PST_DISCOVERY_MAX_PAGE_SIZE`,
+    itself capped below `HARD_MAX_ROWS` to leave room for the lookahead row);
+    no parameter can bypass it;
+  - keyset avoids offset shift, but does **not** guarantee a global snapshot
+    between separate requests (no long-lived transaction across MCP calls);
+  - cursor is **opaque** (`base64url(JSON)` with a format version); its
+    fingerprint binds the tool and its keyset filters (not `page_size`), so a
+    cursor reused with different filters is rejected with a safe, actionable
+    error.
+- `db_describe_table` is **not** paginated: it describes one object and returns
+  all columns (bounded by PostgreSQL's column limit), with no cursor.
+- DB/result streaming: a server-side cursor fetches a bounded page; closing the
+  cursor releases the portal.
+- Transport streaming: MCP returns one tool result; no row streaming and no
+  custom SSE. `Context.report_progress` is the only progress channel.
 - Caching is **not** implemented now (nondeterministic queries, staleness,
   invalidation); `fetch_rows` stays stateless so a cache can wrap it later.
 - `QuerySettings` is the single policy object: the lifespan passes the **same**
-  instance to `Database` (execution limits: `max_rows`/timeouts) and to
-  `AppContext` (tool policy: allowed schemas), so there is one source of truth.
-- Discovery tools live in `discovery.py` (models + SQL builders); `tools.py`
-  holds only MCP handlers and registration. Discovery outputs carry a
-  `truncated` flag so a partial list is never silent.
+  instance to `Database` (execution limits: `max_rows`/timeouts/hard cap) and to
+  `AppContext` (tool policy: allowed schemas, page sizes), so there is one
+  source of truth.
+- Discovery tools live in `discovery.py` (models + SQL builders) and
+  `pagination.py` (opaque cursor); `tools.py` holds only MCP handlers and
+  registration.
 
 ## Security requirements (non-negotiable)
 

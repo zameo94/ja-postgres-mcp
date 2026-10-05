@@ -171,6 +171,8 @@ def test_query_settings_defaults() -> None:
     assert settings.query.statement_timeout_seconds == 5
     assert settings.query.lock_timeout_seconds == 5
     assert settings.query.allowed_schemas == ()
+    assert settings.query.discovery_page_size == 200
+    assert settings.query.discovery_max_page_size == 1000
 
 
 def test_query_settings_can_be_overridden() -> None:
@@ -188,6 +190,46 @@ def test_query_settings_can_be_overridden() -> None:
     assert settings.query.statement_timeout_seconds == 10
     assert settings.query.lock_timeout_seconds == 3
     assert settings.query.allowed_schemas == ("public", "sales")
+
+
+def test_discovery_page_settings_can_be_overridden() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_DISCOVERY_PAGE_SIZE": "50",
+        "JA_PST_DISCOVERY_MAX_PAGE_SIZE": "500",
+    }
+
+    settings = load_settings(env)
+
+    assert settings.query.discovery_page_size == 50
+    assert settings.query.discovery_max_page_size == 500
+
+
+def test_discovery_max_page_smaller_than_page_raises() -> None:
+    env = {
+        **VALID_ENV,
+        "JA_PST_DISCOVERY_PAGE_SIZE": "500",
+        "JA_PST_DISCOVERY_MAX_PAGE_SIZE": "100",
+    }
+
+    with pytest.raises(ConfigurationError, match="JA_PST_DISCOVERY_MAX_PAGE_SIZE"):
+        load_settings(env)
+
+
+def test_discovery_max_page_above_ceiling_raises() -> None:
+    env = {**VALID_ENV, "JA_PST_DISCOVERY_MAX_PAGE_SIZE": "20000"}
+
+    with pytest.raises(ConfigurationError, match="JA_PST_DISCOVERY_MAX_PAGE_SIZE"):
+        load_settings(env)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["JA_PST_DISCOVERY_PAGE_SIZE", "JA_PST_DISCOVERY_MAX_PAGE_SIZE"],
+)
+def test_invalid_discovery_page_values_raise(key: str) -> None:
+    with pytest.raises(ConfigurationError, match=key):
+        load_settings({**VALID_ENV, key: "0"})
 
 
 @pytest.mark.parametrize("value", ["0", "10001", "not-a-number"])
