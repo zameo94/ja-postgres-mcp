@@ -18,7 +18,15 @@ from ja_pst_mcp.database import (
     InvalidQueryError,
     QueryResult,
 )
-from ja_pst_mcp.discovery import SchemaInfo, SchemaListOutput, build_list_schemas_query
+from ja_pst_mcp.discovery import (
+    SchemaInfo,
+    SchemaListOutput,
+    TableInfo,
+    TableKind,
+    TableListOutput,
+    build_list_schemas_query,
+    build_list_tables_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +34,21 @@ DATABASE_UNAVAILABLE_MESSAGE = "The database is currently unavailable."
 DATABASE_OPERATION_MESSAGE = "The database operation failed."
 
 _READ_ONLY_ANNOTATIONS = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+
+_DB_HEALTH_DESCRIPTION = "Check that the server can reach PostgreSQL (read-only)."
+_DB_RUN_QUERY_DESCRIPTION = (
+    "Run a single read-only SQL statement (SELECT/aggregations) and return rows. "
+    "Bind dynamic values with params; never interpolate them into the SQL."
+)
+_DB_LIST_SCHEMAS_DESCRIPTION = (
+    "List database schemas visible to the server, excluding system schemas "
+    "(read-only)."
+)
+_DB_LIST_TABLES_DESCRIPTION = (
+    "List tables, views, materialized views and foreign tables, excluding system "
+    "schemas (read-only). estimated_rows is planner statistics from the last "
+    "ANALYZE: it can be stale and is null when the relation was never analyzed."
+)
 
 
 class QueryOutput(BaseModel):
@@ -50,8 +73,13 @@ def _tool_error(tool_name: str, exc: DatabaseError) -> ToolError:
     return ToolError(message)
 
 
+def _ensure_schema_allowed(schema: str, allowed_schemas: tuple[str, ...]) -> None:
+    if allowed_schemas and schema not in allowed_schemas:
+        raise InvalidQueryError(f"schema {schema!r} is not in the allowed schemas")
+
+
 async def db_health(ctx: Context[AppContext]) -> dict[str, str]:
-    """Check that the server can reach PostgreSQL. Read-only."""
+    """Check that the server can reach PostgreSQL (read-only)."""
     database = ctx.request_context.lifespan_context.database
     try:
         await database.ping()
@@ -65,13 +93,7 @@ async def db_run_read_only_query(
     sql: str,
     params: dict[str, Any] | list[Any] | None = None,
 ) -> QueryOutput:
-    """Run a single read-only SQL statement (SELECT/aggregations) and return rows.
-
-    Use it to answer business questions on the connected database; discover the
-    schema first with the discovery tools. Writing is impossible (read-only).
-    ``params`` are bound by the driver (``%(name)s`` for named, ``%s`` for
-    positional); never build SQL by interpolating values.
-    """
+    """Run a single read-only SQL statement and return rows."""
     database = ctx.request_context.lifespan_context.database
     try:
         result = await database.fetch_rows(sql, params)
@@ -86,11 +108,7 @@ async def db_run_read_only_query(
 
 
 async def db_list_schemas(ctx: Context[AppContext]) -> SchemaListOutput:
-    """List the database schemas visible to the server. Read-only.
-
-    System schemas (``pg_*`` and ``information_schema``) are excluded. The
-    ``truncated`` flag reports if the list was cut at ``JA_PST_MAX_ROWS``.
-    """
+    """List database schemas visible to the server (read-only)."""
     context = ctx.request_context.lifespan_context
     query, params = build_list_schemas_query(context.query.allowed_schemas)
     try:
@@ -109,12 +127,58 @@ def _schema_infos(result: QueryResult) -> list[SchemaInfo]:
     return [SchemaInfo(name=row[0], owner=row[1]) for row in result.rows]
 
 
+async def db_list_tables(
+    ctx: Context[AppContext],
+    schema: str | None = None,
+    kind: TableKind | None = None,
+) -> TableListOutput:
+    """List tables, views, materialized views and foreign tables (read-only)."""
+    context = ctx.request_context.lifespan_context
+    try:
+        if schema is not None:
+            _ensure_schema_allowed(schema, context.query.allowed_schemas)
+        query, params = build_list_tables_query(
+            context.query.allowed_schemas, schema, kind
+        )
+        result = await context.database.fetch_rows(query, params)
+    except DatabaseError as exc:
+        raise _tool_error("db_list_tables", exc) from exc
+    return TableListOutput(tables=_table_infos(result), truncated=result.truncated)
+
+
+def _table_infos(result: QueryResult) -> list[TableInfo]:
+    if result.columns != ("schema_name", "name", "kind", "estimated_rows"):
+        raise RuntimeError("unexpected table listing result shape")
+    return [
+        TableInfo(
+            schema_name=row[0],
+            name=row[1],
+            kind=row[2],
+            estimated_rows=row[3],
+        )
+        for row in result.rows
+    ]
+
+
 def register_tools(server: MCPServer[AppContext]) -> None:
     """Register every MCP tool on ``server``."""
-    server.tool(title="Database health", annotations=_READ_ONLY_ANNOTATIONS)(db_health)
-    server.tool(title="Run read-only query", annotations=_READ_ONLY_ANNOTATIONS)(
-        db_run_read_only_query
-    )
-    server.tool(title="List schemas", annotations=_READ_ONLY_ANNOTATIONS)(
-        db_list_schemas
-    )
+    server.tool(
+        title="Database health",
+        description=_DB_HEALTH_DESCRIPTION,
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )(db_health)
+    server.tool(
+        title="Run read-only query",
+        description=_DB_RUN_QUERY_DESCRIPTION,
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )(db_run_read_only_query)
+    server.tool(
+        title="List schemas",
+        description=_DB_LIST_SCHEMAS_DESCRIPTION,
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )(db_list_schemas)
+    server.tool(
+        title="List tables",
+        description=_DB_LIST_TABLES_DESCRIPTION,
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )(db_list_tables)
