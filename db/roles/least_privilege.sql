@@ -1,4 +1,4 @@
--- Least-privilege role for the ja-pst MCP server.
+-- Least-privilege role for the ja-postgres MCP server.
 --
 -- Run ONCE as a DBA/superuser against the target database. The MCP server never
 -- creates roles: it connects with the role created here, which is the real
@@ -11,9 +11,9 @@
 -- tables. It has no write/DDL privilege, no membership in privileged roles and
 -- no EXECUTE on dangerous functions/extensions.
 
-\set role_name     ja_pst_readonly
+\set role_name     ja_postgres_readonly
 \set role_password 'CHANGE_ME'
-\set dbname        ja_pst
+\set dbname        ja_postgres
 \set schema        public
 
 -- Create the role if it does not exist (idempotent).

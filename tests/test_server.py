@@ -6,8 +6,8 @@ from dataclasses import replace
 
 from mcp.server.transport_security import TransportSecuritySettings
 
-from ja_pst_mcp.config import ServerSettings, Settings
-from ja_pst_mcp.server import (
+from ja_postgres_mcp.config import ServerSettings, Settings
+from ja_postgres_mcp.server import (
     MCP_TRANSPORT,
     SERVER_NAME,
     _transport_security,
@@ -50,24 +50,24 @@ def test_transport_security_is_none_without_allowlist() -> None:
 def test_transport_security_built_from_allowlist(settings: Settings) -> None:
     server = replace(
         settings.server,
-        allowed_hosts=("ja-pst-mcp:8000",),
+        allowed_hosts=("ja-postgres-mcp:8000",),
         allowed_origins=("https://app.example",),
     )
 
     security = _transport_security(server)
 
     assert isinstance(security, TransportSecuritySettings)
-    assert security.allowed_hosts == ["ja-pst-mcp:8000"]
+    assert security.allowed_hosts == ["ja-postgres-mcp:8000"]
     assert security.allowed_origins == ["https://app.example"]
 
 
 def test_transport_security_with_hosts_and_empty_origins(settings: Settings) -> None:
-    server = replace(settings.server, allowed_hosts=("ja-pst-mcp:8000",))
+    server = replace(settings.server, allowed_hosts=("ja-postgres-mcp:8000",))
 
     security = _transport_security(server)
 
     assert isinstance(security, TransportSecuritySettings)
-    assert security.allowed_hosts == ["ja-pst-mcp:8000"]
+    assert security.allowed_hosts == ["ja-postgres-mcp:8000"]
     assert security.allowed_origins == []
 
 
@@ -76,7 +76,7 @@ def test_run_server_passes_configured_transport_security(settings: Settings) -> 
         settings,
         server=replace(
             settings.server,
-            allowed_hosts=("ja-pst-mcp:8000",),
+            allowed_hosts=("ja-postgres-mcp:8000",),
             allowed_origins=("https://app.example",),
         ),
     )
@@ -86,7 +86,7 @@ def test_run_server_passes_configured_transport_security(settings: Settings) -> 
 
     security = fake.calls[0]["transport_security"]
     assert isinstance(security, TransportSecuritySettings)
-    assert security.allowed_hosts == ["ja-pst-mcp:8000"]
+    assert security.allowed_hosts == ["ja-postgres-mcp:8000"]
     assert security.allowed_origins == ["https://app.example"]
 
 

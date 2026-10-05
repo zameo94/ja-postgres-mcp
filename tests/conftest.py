@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings, ServerSettings, Settings
+from ja_postgres_mcp.config import DatabaseSettings, QuerySettings, ServerSettings, Settings
 
 # The Ryuk reaper is unreliable on some Docker setups (e.g. Docker Desktop);
 # the container fixture stops its containers explicitly regardless.

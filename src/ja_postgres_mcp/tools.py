@@ -11,9 +11,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 
-from ja_pst_mcp.config import MAX_DISCOVERY_PAGE_SIZE, QuerySettings
-from ja_pst_mcp.context import AppContext
-from ja_pst_mcp.database import (
+from ja_postgres_mcp.config import MAX_DISCOVERY_PAGE_SIZE, QuerySettings
+from ja_postgres_mcp.context import AppContext
+from ja_postgres_mcp.database import (
     AmbiguousTableError,
     DatabaseConnectionError,
     DatabaseError,
@@ -21,7 +21,7 @@ from ja_pst_mcp.database import (
     QueryResult,
     TableNotFoundError,
 )
-from ja_pst_mcp.discovery import (
+from ja_postgres_mcp.discovery import (
     ColumnInfo,
     ConstraintInfo,
     ConstraintListOutput,
@@ -48,7 +48,7 @@ from ja_pst_mcp.discovery import (
     build_preview_rows_query,
     build_resolve_table_query,
 )
-from ja_pst_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
+from ja_postgres_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
 
 logger = logging.getLogger(__name__)
 

@@ -9,18 +9,18 @@ from typing import Final
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-from ja_pst_mcp.config import (
+from ja_postgres_mcp.config import (
     DatabaseSettings,
     QuerySettings,
     ServerSettings,
     Settings,
     load_settings,
 )
-from ja_pst_mcp.context import AppContext
-from ja_pst_mcp.database import Database, DatabaseProtocol
-from ja_pst_mcp.tools import register_tools
+from ja_postgres_mcp.context import AppContext
+from ja_postgres_mcp.database import Database, DatabaseProtocol
+from ja_postgres_mcp.tools import register_tools
 
-SERVER_NAME: Final = "ja-pst-mcp"
+SERVER_NAME: Final = "ja-postgres-mcp"
 MCP_TRANSPORT: Final = "streamable-http"
 
 DatabaseFactory = Callable[[DatabaseSettings, QuerySettings], DatabaseProtocol]

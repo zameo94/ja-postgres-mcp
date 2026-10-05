@@ -24,4 +24,4 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["ja-pst-mcp"]
+CMD ["ja-postgres-mcp"]

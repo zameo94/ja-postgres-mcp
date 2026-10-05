@@ -1,4 +1,4 @@
--- Demo database for manual testing of ja-pst-mcp.
+-- Demo database for manual testing of ja-postgres-mcp.
 --
 -- The postgres image runs every *.sql in /docker-entrypoint-initdb.d on the
 -- first initialization (empty data directory), so this seed runs only when the

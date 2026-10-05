@@ -9,7 +9,7 @@ from typing import Literal, cast
 
 from dotenv import dotenv_values, find_dotenv
 
-_ENV_PREFIX = "JA_PST_"
+_ENV_PREFIX = "JA_POSTGRES_"
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 

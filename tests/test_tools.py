@@ -10,14 +10,14 @@ from typing import Any
 from mcp import Client
 from psycopg import OperationalError
 
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings, Settings
-from ja_pst_mcp.database import (
+from ja_postgres_mcp.config import DatabaseSettings, QuerySettings, Settings
+from ja_postgres_mcp.database import (
     DatabaseConnectionError,
     DatabaseError,
     InvalidQueryError,
     QueryResult,
 )
-from ja_pst_mcp.discovery import (
+from ja_postgres_mcp.discovery import (
     build_describe_columns_query,
     build_get_view_definition_query,
     build_list_constraints_query,
@@ -29,9 +29,9 @@ from ja_pst_mcp.discovery import (
     build_preview_rows_query,
     build_resolve_table_query,
 )
-from ja_pst_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
-from ja_pst_mcp.server import create_server
-from ja_pst_mcp.tools import (
+from ja_postgres_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
+from ja_postgres_mcp.server import create_server
+from ja_postgres_mcp.tools import (
     DATABASE_OPERATION_MESSAGE,
     DATABASE_UNAVAILABLE_MESSAGE,
 )

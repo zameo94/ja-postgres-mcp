@@ -3,15 +3,15 @@
 #   docker compose -f docker-compose.yaml -f docker-compose.demo.yaml up
 #
 # The seed runs only on first initialization (empty volume). Remove the
-# `ja_pst_mcp_postgres_volume` volume to re-seed from scratch.
+# `ja_postgres_mcp_postgres_volume` volume to re-seed from scratch.
 
 services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: ${JA_PST_DB_NAME:-ja_pst}
-      POSTGRES_USER: ${JA_PST_DB_USER:-ja_pst}
-      POSTGRES_PASSWORD: ${JA_PST_DB_PASSWORD:?set JA_PST_DB_PASSWORD in .env}
+      POSTGRES_DB: ${JA_POSTGRES_DB_NAME:-ja_postgres}
+      POSTGRES_USER: ${JA_POSTGRES_DB_USER:-ja_postgres}
+      POSTGRES_PASSWORD: ${JA_POSTGRES_DB_PASSWORD:?set JA_POSTGRES_DB_PASSWORD in .env}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -23,13 +23,13 @@ services:
       timeout: 5s
       retries: 10
 
-  ja-pst-mcp:
+  ja-postgres-mcp:
     environment:
-      JA_PST_DB_HOST: postgres
+      JA_POSTGRES_DB_HOST: postgres
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
   postgres-data:
-    name: ja_pst_mcp_postgres_volume
+    name: ja_postgres_mcp_postgres_volume

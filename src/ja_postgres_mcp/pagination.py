@@ -16,7 +16,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
-from ja_pst_mcp.database import InvalidQueryError
+from ja_postgres_mcp.database import InvalidQueryError
 
 _CURSOR_VERSION = 1
 _SCOPE_DIGEST_SIZE = 8  # 64 bits -> 16 hex characters

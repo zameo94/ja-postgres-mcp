@@ -1,11 +1,11 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in `ja-pst-mcp`.
+Guidance for AI coding agents working in `ja-postgres-mcp`.
 
 ## What this repository is
 
 An MCP server (Python 3.12, Docker, PostgreSQL) consumed by the separate
-`ja-pst-mcp-client` application over MCP.
+`ja-postgres-mcp-client` application over MCP.
 
 This repository owns: MCP server, MCP tools, PostgreSQL access, configuration,
 connection management, input validation, error handling, logging, security,
@@ -14,7 +14,7 @@ tests, Docker and essential documentation.
 This repository does **not** own the web application layer. Do not add React,
 FastAPI, HTTP APIs, an Agent, an MCP Client, conversation handling,
 application authentication or `/api/...` endpoints — those belong to
-`ja-pst-mcp-client`.
+`ja-postgres-mcp-client`.
 
 ## Quality bar
 
@@ -31,8 +31,8 @@ application authentication or `/api/...` endpoints — those belong to
 
 ## Product and domain direction
 
-- `pst` = **PostgreSQL**. This is a **generic PostgreSQL MCP**, not a vertical
-  (no legal/BI/CRM domain baked in).
+- This is a **generic PostgreSQL MCP**, not a vertical (no legal/BI/CRM domain
+  baked in).
 - **The database is the domain.** Tables, columns, constraints and data are
   discovered **at runtime**; never hardcode application entities (no
   `clients`, `invoices`, etc.). The demo database is only a test fixture.
@@ -51,17 +51,17 @@ application authentication or `/api/...` endpoints — those belong to
 
 ### Read-only query policy (MVP defaults)
 
-- `JA_PST_MAX_ROWS=200`, `JA_PST_STATEMENT_TIMEOUT=5`, `JA_PST_LOCK_TIMEOUT=5`.
-- Discovery pagination: `JA_PST_DISCOVERY_PAGE_SIZE=200`,
-  `JA_PST_DISCOVERY_MAX_PAGE_SIZE=1000`.
-- `JA_PST_ALLOWED_SCHEMAS` is optional and consumed by the **discovery** tools
+- `JA_POSTGRES_MAX_ROWS=200`, `JA_POSTGRES_STATEMENT_TIMEOUT=5`, `JA_POSTGRES_LOCK_TIMEOUT=5`.
+- Discovery pagination: `JA_POSTGRES_DISCOVERY_PAGE_SIZE=200`,
+  `JA_POSTGRES_DISCOVERY_MAX_PAGE_SIZE=1000`.
+- `JA_POSTGRES_ALLOWED_SCHEMAS` is optional and consumed by the **discovery** tools
   (schema/table listing); arbitrary read-only queries are not filtered by it.
   Discovery excludes system schemas (`pg_catalog`, `information_schema`,
   `pg_toast`) by default; empty allowlist means all non-system schemas.
 - Every pooled connection is `default_transaction_read_only=on`; analysis query
   timeouts are set locally per transaction.
-- The connection pool is configured via `JA_PST_DB_POOL_MIN`,
-  `JA_PST_DB_POOL_MAX` and `JA_PST_DB_POOL_TIMEOUT`; it bounds how many queries
+- The connection pool is configured via `JA_POSTGRES_DB_POOL_MIN`,
+  `JA_POSTGRES_DB_POOL_MAX` and `JA_POSTGRES_DB_POOL_TIMEOUT`; it bounds how many queries
   run concurrently (each `fetch_rows` checks out its own connection).
 - Analysis queries run through a **server-side cursor** (`DECLARE ... CURSOR`),
   which uses the extended protocol, so **multiple statements are structurally
@@ -96,7 +96,7 @@ application authentication or `/api/...` endpoints — those belong to
     combines both shapes (keyset on the primary key, ordered by its text form).
 - Discovery pagination rules:
   - stable, deterministic ordering (keyset); **no OFFSET**;
-  - `page_size` bounded by a hard maximum (`JA_PST_DISCOVERY_MAX_PAGE_SIZE`,
+  - `page_size` bounded by a hard maximum (`JA_POSTGRES_DISCOVERY_MAX_PAGE_SIZE`,
     itself capped below `HARD_MAX_ROWS` to leave room for the lookahead row);
     no parameter can bypass it;
   - keyset avoids offset shift, but does **not** guarantee a global snapshot
@@ -241,7 +241,7 @@ pytest
 ## Project structure
 
 ```
-src/ja_pst_mcp/    # package
+src/ja_postgres_mcp/    # package
 tests/             # pytest tests
 db/demo/           # demo seed for the local demo stack (not used by tools)
 db/roles/          # least-privilege role reference script

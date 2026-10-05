@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from ja_pst_mcp.database import InvalidQueryError
-from ja_pst_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
+from ja_postgres_mcp.database import InvalidQueryError
+from ja_postgres_mcp.pagination import cursor_scope, decode_cursor, encode_cursor
 
 SCOPE = cursor_scope("db_list_tables", {"schema": "public", "kind": None})
 

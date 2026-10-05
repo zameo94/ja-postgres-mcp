@@ -12,12 +12,12 @@ from psycopg import AsyncConnection
 from psycopg import Error as PsycopgError
 from psycopg_pool import AsyncConnectionPool
 
-from ja_pst_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
+from ja_postgres_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
 
 # Every pooled connection is read-only: the server is read-only by design.
 _READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
 # Prefix for the server-side cursor name (unique per query).
-_CURSOR_NAME_PREFIX = "ja_pst_"
+_CURSOR_NAME_PREFIX = "ja_postgres_"
 # PostgreSQL error raised when the extended protocol receives several commands.
 _MULTIPLE_STATEMENTS_SQLSTATE = "42601"
 _MULTIPLE_STATEMENTS_MESSAGE = "cannot insert multiple commands"

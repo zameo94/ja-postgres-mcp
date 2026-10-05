@@ -1,17 +1,17 @@
-# ja-pst-mcp
+# Ja Postgres MCP
 
 The code in this repo was entirely written by a coding agent (mostly DeepSeek
 V4.1 Flash). The idea, the architecture and the system design were under human
 control.
 
-A **generic PostgreSQL MCP server**. `pst` stands for PostgreSQL: this is not a
-vertical (no legal/BI/CRM domain baked in). It connects to an **arbitrary,
-already existing PostgreSQL 15+** database, discovers its schema at runtime and
-lets a model answer real business questions with **read-only** SQL.
+A **generic PostgreSQL MCP server**, not a vertical (no legal/BI/CRM domain baked
+in). It connects to an **arbitrary, already existing PostgreSQL 15+** database,
+discovers its schema at runtime and lets a model answer real business questions
+with **read-only** SQL.
 
 The **database is the domain**: tables, columns, constraints and data are
 discovered at runtime and never hardcoded. The server is consumed by the separate
-`ja-pst-mcp-client` application over MCP.
+`ja-postgres-mcp-client` application over MCP.
 
 > **PostgreSQL 15 or newer.** The server targets PostgreSQL 15+; its SQL and
 > catalog queries are compatible with version 15 and later.
@@ -42,7 +42,7 @@ discovered at runtime and never hardcoded. The server is consumed by the separat
 
 ## Project
 
-`ja-pst-mcp` is a **read-only PostgreSQL MCP server** exposed over **MCP
+`ja-postgres-mcp` is a **read-only PostgreSQL MCP server** exposed over **MCP
 Streamable HTTP**. The model goes through a fixed flow:
 
 ```
@@ -88,7 +88,7 @@ This starts the MCP server **and** a PostgreSQL 15 seeded from
 | Service     | URL                                   |
 | ----------- | ------------------------------------- |
 | MCP server  | http://localhost:8000/mcp             |
-| Demo DB     | `localhost:5432` (`JA_PST_DB_*` creds) |
+| Demo DB     | `localhost:5432` (`JA_POSTGRES_DB_*` creds) |
 
 ### Server only (against an existing database)
 
@@ -96,12 +96,12 @@ This starts the MCP server **and** a PostgreSQL 15 seeded from
 docker compose up -d --build
 ```
 
-This starts only the MCP server; point `JA_PST_DB_HOST` (and the rest of the
-`JA_PST_DB_*` variables) in `.env` at your database. From inside the container,
+This starts only the MCP server; point `JA_POSTGRES_DB_HOST` (and the rest of the
+`JA_POSTGRES_DB_*` variables) in `.env` at your database. From inside the container,
 a database on the host is reachable as `host.docker.internal` (Docker Desktop).
 
 The seed runs **only on the first initialization** of the demo volume. To
-re-seed from scratch, remove the `ja_pst_mcp_postgres_volume` volume.
+re-seed from scratch, remove the `ja_postgres_mcp_postgres_volume` volume.
 
 ### Local development (server outside Docker)
 
@@ -117,10 +117,10 @@ poetry run pytest   # integration tests provision PostgreSQL 15 via testcontaine
 The server speaks **MCP Streamable HTTP**; the client connects to the MCP
 endpoint (default path `/mcp`) and does not spawn the server as a subprocess.
 
-- Endpoint: `http://<host>:<JA_PST_SERVER_PORT>/mcp`.
-- The bind address/port come from `JA_PST_SERVER_HOST` / `JA_PST_SERVER_PORT`.
-- Behind a real hostname you must allow it: set `JA_PST_ALLOWED_HOSTS` (and, for
-  browser clients, `JA_PST_ALLOWED_ORIGINS`). A non-localhost bind **without** an
+- Endpoint: `http://<host>:<JA_POSTGRES_SERVER_PORT>/mcp`.
+- The bind address/port come from `JA_POSTGRES_SERVER_HOST` / `JA_POSTGRES_SERVER_PORT`.
+- Behind a real hostname you must allow it: set `JA_POSTGRES_ALLOWED_HOSTS` (and, for
+  browser clients, `JA_POSTGRES_ALLOWED_ORIGINS`). A non-localhost bind **without** an
   allowlist fails at startup (fail-closed).
 
 The MCP server is a standalone service; there is **no custom REST API** — the
@@ -282,7 +282,7 @@ few tests run against a realistic structure.
 ## Repository layout
 
 ```
-src/ja_pst_mcp/
+src/ja_postgres_mcp/
   server.py        # MCP server (Streamable HTTP), lifespan, CLI entry point
   tools.py         # MCP tool handlers + registration
   discovery.py     # discovery models + SQL builders
@@ -311,36 +311,36 @@ precedence over `.env`.
 
 | Variable                     | Default     | Notes                                   |
 | ---------------------------- | ----------- | --------------------------------------- |
-| `JA_PST_DB_HOST`             | — (required)|                                         |
-| `JA_PST_DB_PORT`             | `5432`      |                                         |
-| `JA_PST_DB_NAME`             | — (required)|                                         |
-| `JA_PST_DB_USER`             | — (required)|                                         |
-| `JA_PST_DB_PASSWORD`         | — (required)|                                         |
-| `JA_PST_DB_CONNECT_TIMEOUT`  | `10`        | seconds                                 |
-| `JA_PST_DB_POOL_MIN`         | `1`         | pool lower bound                        |
-| `JA_PST_DB_POOL_MAX`         | `5`         | bounds concurrent DB work               |
-| `JA_PST_DB_POOL_TIMEOUT`     | `30`        | seconds to acquire a connection         |
+| `JA_POSTGRES_DB_HOST`             | — (required)|                                         |
+| `JA_POSTGRES_DB_PORT`             | `5432`      |                                         |
+| `JA_POSTGRES_DB_NAME`             | — (required)|                                         |
+| `JA_POSTGRES_DB_USER`             | — (required)|                                         |
+| `JA_POSTGRES_DB_PASSWORD`         | — (required)|                                         |
+| `JA_POSTGRES_DB_CONNECT_TIMEOUT`  | `10`        | seconds                                 |
+| `JA_POSTGRES_DB_POOL_MIN`         | `1`         | pool lower bound                        |
+| `JA_POSTGRES_DB_POOL_MAX`         | `5`         | bounds concurrent DB work               |
+| `JA_POSTGRES_DB_POOL_TIMEOUT`     | `30`        | seconds to acquire a connection         |
 
 ### Server
 
 | Variable                 | Default     | Notes                                                       |
 | ------------------------ | ----------- | ----------------------------------------------------------- |
-| `JA_PST_SERVER_HOST`     | `127.0.0.1` | non-localhost requires `ALLOWED_HOSTS`                      |
-| `JA_PST_SERVER_PORT`     | `8000`      |                                                             |
-| `JA_PST_ALLOWED_HOSTS`   | empty       | comma-separated; enables DNS-rebinding protection           |
-| `JA_PST_ALLOWED_ORIGINS` | empty       | needed by browser MCP clients                               |
-| `JA_PST_LOG_LEVEL`       | `INFO`      | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`                 |
+| `JA_POSTGRES_SERVER_HOST`     | `127.0.0.1` | non-localhost requires `ALLOWED_HOSTS`                      |
+| `JA_POSTGRES_SERVER_PORT`     | `8000`      |                                                             |
+| `JA_POSTGRES_ALLOWED_HOSTS`   | empty       | comma-separated; enables DNS-rebinding protection           |
+| `JA_POSTGRES_ALLOWED_ORIGINS` | empty       | needed by browser MCP clients                               |
+| `JA_POSTGRES_LOG_LEVEL`       | `INFO`      | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`                 |
 
 ### Query and discovery policy
 
 | Variable                       | Default | Notes                                        |
 | ------------------------------ | ------- | -------------------------------------------- |
-| `JA_PST_MAX_ROWS`              | `200`   | safety cap for `db_run_read_only_query`      |
-| `JA_PST_STATEMENT_TIMEOUT`     | `5`     | seconds, per transaction                     |
-| `JA_PST_LOCK_TIMEOUT`          | `5`     | seconds, per transaction                     |
-| `JA_PST_DISCOVERY_PAGE_SIZE`   | `200`   | default discovery page size                  |
-| `JA_PST_DISCOVERY_MAX_PAGE_SIZE` | `1000`| hard maximum for a discovery page            |
-| `JA_PST_ALLOWED_SCHEMAS`       | empty   | discovery allowlist; empty = all non-system  |
+| `JA_POSTGRES_MAX_ROWS`              | `200`   | safety cap for `db_run_read_only_query`      |
+| `JA_POSTGRES_STATEMENT_TIMEOUT`     | `5`     | seconds, per transaction                     |
+| `JA_POSTGRES_LOCK_TIMEOUT`          | `5`     | seconds, per transaction                     |
+| `JA_POSTGRES_DISCOVERY_PAGE_SIZE`   | `200`   | default discovery page size                  |
+| `JA_POSTGRES_DISCOVERY_MAX_PAGE_SIZE` | `1000`| hard maximum for a discovery page            |
+| `JA_POSTGRES_ALLOWED_SCHEMAS`       | empty   | discovery allowlist; empty = all non-system  |
 
 Discovery always excludes system schemas (`pg_catalog`, `information_schema`,
 `pg_toast`).

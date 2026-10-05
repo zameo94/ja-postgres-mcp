@@ -15,44 +15,44 @@ import pytest
 from mcp import Client
 from psycopg.pq import TransactionStatus
 
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings, ServerSettings, Settings
-from ja_pst_mcp.database import (
+from ja_postgres_mcp.config import DatabaseSettings, QuerySettings, ServerSettings, Settings
+from ja_postgres_mcp.database import (
     Database,
     DatabaseConnectionError,
     DatabaseError,
     InvalidQueryError,
 )
-from ja_pst_mcp.server import create_server
+from ja_postgres_mcp.server import create_server
 
 pytestmark = pytest.mark.integration
 
-PROBE_TABLE = "ja_pst_probe"
-PROBE_VIEW = "ja_pst_probe_view"
-PROBE_MATVIEW = "ja_pst_probe_mv"
-PROBE_PARTITIONED = "ja_pst_probe_part"
-PROBE_PARTITION = "ja_pst_probe_part_p1"
+PROBE_TABLE = "ja_postgres_probe"
+PROBE_VIEW = "ja_postgres_probe_view"
+PROBE_MATVIEW = "ja_postgres_probe_mv"
+PROBE_PARTITIONED = "ja_postgres_probe_part"
+PROBE_PARTITION = "ja_postgres_probe_part_p1"
 
 # Statements that must be impossible through the tool.
 WRITE_AND_DDL_STATEMENTS = [
-    "INSERT INTO ja_pst_probe (id) VALUES (2)",
-    "UPDATE ja_pst_probe SET note = 'hacked'",
-    "DELETE FROM ja_pst_probe",
-    "TRUNCATE ja_pst_probe",
-    "ALTER TABLE ja_pst_probe ADD COLUMN extra int",
-    "DROP TABLE ja_pst_probe",
-    "CREATE TABLE ja_pst_should_not_exist (id int)",
-    "CREATE SCHEMA ja_pst_should_not_exist",
-    "DROP SCHEMA ja_pst_should_not_exist",
-    "GRANT SELECT ON ja_pst_probe TO PUBLIC",
-    "REVOKE SELECT ON ja_pst_probe FROM PUBLIC",
-    "CALL ja_pst_noop()",
+    "INSERT INTO ja_postgres_probe (id) VALUES (2)",
+    "UPDATE ja_postgres_probe SET note = 'hacked'",
+    "DELETE FROM ja_postgres_probe",
+    "TRUNCATE ja_postgres_probe",
+    "ALTER TABLE ja_postgres_probe ADD COLUMN extra int",
+    "DROP TABLE ja_postgres_probe",
+    "CREATE TABLE ja_postgres_should_not_exist (id int)",
+    "CREATE SCHEMA ja_postgres_should_not_exist",
+    "DROP SCHEMA ja_postgres_should_not_exist",
+    "GRANT SELECT ON ja_postgres_probe TO PUBLIC",
+    "REVOKE SELECT ON ja_postgres_probe FROM PUBLIC",
+    "CALL ja_postgres_noop()",
 ]
 
 # Valid cursor queries that attempt a write; only READ ONLY stops these.
 DATA_MODIFYING_CTES = [
-    "WITH x AS (INSERT INTO ja_pst_probe (id) VALUES (2) RETURNING id) SELECT * FROM x",
-    "WITH x AS (UPDATE ja_pst_probe SET note = 'hacked' RETURNING id) SELECT * FROM x",
-    "WITH x AS (DELETE FROM ja_pst_probe RETURNING id) SELECT * FROM x",
+    "WITH x AS (INSERT INTO ja_postgres_probe (id) VALUES (2) RETURNING id) SELECT * FROM x",
+    "WITH x AS (UPDATE ja_postgres_probe SET note = 'hacked' RETURNING id) SELECT * FROM x",
+    "WITH x AS (DELETE FROM ja_postgres_probe RETURNING id) SELECT * FROM x",
 ]
 
 
@@ -90,7 +90,7 @@ async def _connect_writable(settings: DatabaseSettings) -> psycopg.AsyncConnecti
 async def _server_cursor_count(database: Database) -> int:
     async with database.connection() as connection:
         async with connection.cursor() as cursor:
-            await cursor.execute("SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'")
+            await cursor.execute("SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_postgres_%'")
             row = await cursor.fetchone()
     assert row is not None
     return row[0]
@@ -105,7 +105,9 @@ async def _server_cursor_counts(database: Database, count: int) -> list[int]:
     async def one() -> int:
         async with database.connection() as connection:
             async with connection.cursor() as cursor:
-                await cursor.execute("SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_pst_%'")
+                await cursor.execute(
+                    "SELECT count(*) FROM pg_cursors WHERE name LIKE 'ja_postgres_%'"
+                )
                 row = await cursor.fetchone()
                 assert row is not None
                 return row[0]
@@ -380,7 +382,7 @@ async def test_write_attempts_leave_data_unchanged(database: Database, probe_tab
 
 
 async def test_params_are_not_interpolated(database: Database, probe_table: str) -> None:
-    payload = "1; DROP TABLE ja_pst_probe"
+    payload = "1; DROP TABLE ja_postgres_probe"
     result = await database.fetch_rows("SELECT %(value)s AS v", {"value": payload})
 
     assert result.rows == ((payload,),)
@@ -425,7 +427,7 @@ async def test_db_list_schemas_traverses_pages(
     db_settings: DatabaseSettings,
 ) -> None:
     connection = await _connect_writable(db_settings)
-    created_schemas = [f"ja_pst_page_{index}" for index in range(5)]
+    created_schemas = [f"ja_postgres_page_{index}" for index in range(5)]
     try:
         for schema in created_schemas:
             await connection.execute(f"CREATE SCHEMA {schema}")
@@ -469,30 +471,30 @@ async def test_db_list_schemas_traverses_pages(
 async def limited_settings(db_settings: DatabaseSettings) -> AsyncIterator[DatabaseSettings]:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_sales CASCADE")
-        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_hidden CASCADE")
-        await connection.execute("DROP ROLE IF EXISTS ja_pst_limited")
-        await connection.execute("CREATE SCHEMA ja_pst_sales")
-        await connection.execute("CREATE SCHEMA ja_pst_hidden")
-        await connection.execute("CREATE TABLE ja_pst_sales.items (id int, label text)")
-        await connection.execute("INSERT INTO ja_pst_sales.items VALUES (1, 'a')")
-        await connection.execute("CREATE ROLE ja_pst_limited LOGIN PASSWORD 'limited'")
-        await connection.execute("GRANT USAGE ON SCHEMA ja_pst_sales TO ja_pst_limited")
+        await connection.execute("DROP SCHEMA IF EXISTS ja_postgres_sales CASCADE")
+        await connection.execute("DROP SCHEMA IF EXISTS ja_postgres_hidden CASCADE")
+        await connection.execute("DROP ROLE IF EXISTS ja_postgres_limited")
+        await connection.execute("CREATE SCHEMA ja_postgres_sales")
+        await connection.execute("CREATE SCHEMA ja_postgres_hidden")
+        await connection.execute("CREATE TABLE ja_postgres_sales.items (id int, label text)")
+        await connection.execute("INSERT INTO ja_postgres_sales.items VALUES (1, 'a')")
+        await connection.execute("CREATE ROLE ja_postgres_limited LOGIN PASSWORD 'limited'")
+        await connection.execute("GRANT USAGE ON SCHEMA ja_postgres_sales TO ja_postgres_limited")
         await connection.execute(
-            "GRANT SELECT ON ALL TABLES IN SCHEMA ja_pst_sales TO ja_pst_limited"
+            "GRANT SELECT ON ALL TABLES IN SCHEMA ja_postgres_sales TO ja_postgres_limited"
         )
         await connection.commit()
         yield DatabaseSettings(
             host=db_settings.host,
             port=db_settings.port,
             name=db_settings.name,
-            user="ja_pst_limited",
+            user="ja_postgres_limited",
             password="limited",
         )
     finally:
-        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_sales CASCADE")
-        await connection.execute("DROP SCHEMA IF EXISTS ja_pst_hidden CASCADE")
-        await connection.execute("DROP ROLE IF EXISTS ja_pst_limited")
+        await connection.execute("DROP SCHEMA IF EXISTS ja_postgres_sales CASCADE")
+        await connection.execute("DROP SCHEMA IF EXISTS ja_postgres_hidden CASCADE")
+        await connection.execute("DROP ROLE IF EXISTS ja_postgres_limited")
         await connection.commit()
         await connection.close()
 
@@ -502,7 +504,7 @@ async def test_least_privilege_role_can_read(
 ) -> None:
     connection = await _connect_writable(limited_settings)
     try:
-        cursor = await connection.execute("SELECT id, label FROM ja_pst_sales.items")
+        cursor = await connection.execute("SELECT id, label FROM ja_postgres_sales.items")
         assert await cursor.fetchall() == [(1, "a")]
     finally:
         await connection.close()
@@ -511,11 +513,11 @@ async def test_least_privilege_role_can_read(
 @pytest.mark.parametrize(
     "statement",
     [
-        "INSERT INTO ja_pst_sales.items (id) VALUES (2)",
-        "UPDATE ja_pst_sales.items SET label = 'x'",
-        "DELETE FROM ja_pst_sales.items",
-        "CREATE TABLE ja_pst_sales.new_table (id int)",
-        "DROP TABLE ja_pst_sales.items",
+        "INSERT INTO ja_postgres_sales.items (id) VALUES (2)",
+        "UPDATE ja_postgres_sales.items SET label = 'x'",
+        "DELETE FROM ja_postgres_sales.items",
+        "CREATE TABLE ja_postgres_sales.new_table (id int)",
+        "DROP TABLE ja_postgres_sales.items",
         "CREATE TABLE public.should_not_exist (id int)",
     ],
 )
@@ -545,8 +547,8 @@ async def test_db_list_schemas_respects_least_privilege(
         result = await client.call_tool("db_list_schemas", {})
 
     names = [schema["name"] for schema in result.structured_content["schemas"]]
-    assert "ja_pst_sales" in names
-    assert "ja_pst_hidden" not in names
+    assert "ja_postgres_sales" in names
+    assert "ja_postgres_hidden" not in names
 
 
 async def test_db_list_tables_tool_end_to_end(
@@ -568,7 +570,7 @@ async def test_db_list_tables_traverses_pages(
     db_settings: DatabaseSettings,
 ) -> None:
     connection = await _connect_writable(db_settings)
-    created_tables = [f"ja_pst_page_{index}" for index in range(5)]
+    created_tables = [f"ja_postgres_page_{index}" for index in range(5)]
     try:
         for table in created_tables:
             await connection.execute(f"CREATE TABLE {table} (id int)")
@@ -613,8 +615,8 @@ async def test_db_list_tables_rejects_cursor_from_other_scope(
 ) -> None:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("CREATE TABLE ja_pst_scope_a (id int)")
-        await connection.execute("CREATE TABLE ja_pst_scope_b (id int)")
+        await connection.execute("CREATE TABLE ja_postgres_scope_a (id int)")
+        await connection.execute("CREATE TABLE ja_postgres_scope_b (id int)")
         await connection.commit()
 
         settings = Settings(
@@ -636,8 +638,8 @@ async def test_db_list_tables_rejects_cursor_from_other_scope(
         assert mismatch.is_error is True
         assert "does not match" in mismatch.content[0].text
     finally:
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_scope_a")
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_scope_b")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_scope_a")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_scope_b")
         await connection.commit()
         await connection.close()
 
@@ -706,7 +708,9 @@ async def test_db_describe_table_reports_missing_table(
     server = create_server(settings)
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool("db_describe_table", {"table": "ja_pst_does_not_exist"})
+        result = await client.call_tool(
+            "db_describe_table", {"table": "ja_postgres_does_not_exist"}
+        )
 
     assert result.is_error is True
     assert "not found" in result.content[0].text
@@ -827,26 +831,28 @@ async def test_open_wraps_unreachable_database() -> None:
 async def probe_graph(db_settings: DatabaseSettings) -> AsyncIterator[None]:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("DROP VIEW IF EXISTS ja_pst_child_view")
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_child CASCADE")
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_parent CASCADE")
+        await connection.execute("DROP VIEW IF EXISTS ja_postgres_child_view")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_child CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_parent CASCADE")
         await connection.execute(
-            "CREATE TABLE ja_pst_parent (id int PRIMARY KEY, label text UNIQUE)"
+            "CREATE TABLE ja_postgres_parent (id int PRIMARY KEY, label text UNIQUE)"
         )
         await connection.execute(
-            "CREATE TABLE ja_pst_child (id int PRIMARY KEY, "
-            "parent_id int REFERENCES ja_pst_parent(id), note text CHECK (note <> ''))"
+            "CREATE TABLE ja_postgres_child (id int PRIMARY KEY, "
+            "parent_id int REFERENCES ja_postgres_parent(id), note text CHECK (note <> ''))"
         )
-        await connection.execute("CREATE INDEX ja_pst_child_note_idx ON ja_pst_child (note)")
         await connection.execute(
-            "CREATE VIEW ja_pst_child_view AS SELECT id, note FROM ja_pst_child"
+            "CREATE INDEX ja_postgres_child_note_idx ON ja_postgres_child (note)"
+        )
+        await connection.execute(
+            "CREATE VIEW ja_postgres_child_view AS SELECT id, note FROM ja_postgres_child"
         )
         await connection.commit()
         yield
     finally:
-        await connection.execute("DROP VIEW IF EXISTS ja_pst_child_view")
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_child CASCADE")
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_parent CASCADE")
+        await connection.execute("DROP VIEW IF EXISTS ja_postgres_child_view")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_child CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_parent CASCADE")
         await connection.commit()
         await connection.close()
 
@@ -864,7 +870,7 @@ async def test_db_list_constraints_tool(db_settings: DatabaseSettings, probe_gra
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool(
-            "db_list_constraints", {"schema": "public", "table": "ja_pst_child"}
+            "db_list_constraints", {"schema": "public", "table": "ja_postgres_child"}
         )
 
     kinds = {constraint["kind"] for constraint in result.structured_content["constraints"]}
@@ -877,7 +883,7 @@ async def test_db_list_constraints_reports_unique(
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool("db_list_constraints", {"table": "ja_pst_parent"})
+        result = await client.call_tool("db_list_constraints", {"table": "ja_postgres_parent"})
 
     kinds = {constraint["kind"] for constraint in result.structured_content["constraints"]}
     assert "unique" in kinds
@@ -889,15 +895,17 @@ async def test_db_list_constraints_skips_partition_clones(
 ) -> None:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_part CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_part CASCADE")
         await connection.execute(
-            "CREATE TABLE ja_pst_part (id int PRIMARY KEY, note text) PARTITION BY RANGE (id)"
+            "CREATE TABLE ja_postgres_part (id int PRIMARY KEY, note text) PARTITION BY RANGE (id)"
         )
         await connection.execute(
-            "CREATE TABLE ja_pst_part_p1 PARTITION OF ja_pst_part FOR VALUES FROM (0) TO (100)"
+            "CREATE TABLE ja_postgres_part_p1 PARTITION OF ja_postgres_part "
+            "FOR VALUES FROM (0) TO (100)"
         )
         await connection.execute(
-            "CREATE TABLE ja_pst_part_p2 PARTITION OF ja_pst_part FOR VALUES FROM (100) TO (200)"
+            "CREATE TABLE ja_postgres_part_p2 PARTITION OF ja_postgres_part "
+            "FOR VALUES FROM (100) TO (200)"
         )
         await connection.commit()
 
@@ -907,11 +915,11 @@ async def test_db_list_constraints_skips_partition_clones(
             result = await client.call_tool("db_list_constraints", {})
 
         tables = {item["table_name"] for item in result.structured_content["constraints"]}
-        assert "ja_pst_part" in tables
-        assert "ja_pst_part_p1" not in tables
-        assert "ja_pst_part_p2" not in tables
+        assert "ja_postgres_part" in tables
+        assert "ja_postgres_part_p1" not in tables
+        assert "ja_postgres_part_p2" not in tables
     finally:
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_part CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_part CASCADE")
         await connection.commit()
         await connection.close()
 
@@ -920,20 +928,20 @@ async def test_db_list_relationships_tool(db_settings: DatabaseSettings, probe_g
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool("db_list_relationships", {"table": "ja_pst_child"})
+        result = await client.call_tool("db_list_relationships", {"table": "ja_postgres_child"})
 
     relationships = result.structured_content["relationships"]
-    assert any(item["target_table"] == "ja_pst_parent" for item in relationships)
+    assert any(item["target_table"] == "ja_postgres_parent" for item in relationships)
 
 
 async def test_db_list_indexes_tool(db_settings: DatabaseSettings, probe_graph: None) -> None:
     server = create_server(_settings(db_settings))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool("db_list_indexes", {"table": "ja_pst_child"})
+        result = await client.call_tool("db_list_indexes", {"table": "ja_postgres_child"})
 
     indexes = result.structured_content["indexes"]
-    note_index = next(item for item in indexes if item["name"] == "ja_pst_child_note_idx")
+    note_index = next(item for item in indexes if item["name"] == "ja_postgres_child_note_idx")
     assert note_index["columns"] == ["note"]
     assert note_index["method"] == "btree"
 
@@ -946,18 +954,19 @@ async def test_db_get_view_definition_tool(
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool(
             "db_get_view_definition",
-            {"view": "ja_pst_child_view", "schema": "public"},
+            {"view": "ja_postgres_child_view", "schema": "public"},
         )
 
     assert result.structured_content["kind"] == "view"
-    assert "ja_pst_child" in result.structured_content["definition"]
+    assert "ja_postgres_child" in result.structured_content["definition"]
 
 
 async def test_db_preview_table_tool(db_settings: DatabaseSettings, probe_graph: None) -> None:
     connection = await _connect_writable(db_settings)
     try:
         await connection.execute(
-            "INSERT INTO ja_pst_child (id, parent_id, note) VALUES (1, NULL, 'a'), (2, NULL, 'b')"
+            "INSERT INTO ja_postgres_child (id, parent_id, note) "
+            "VALUES (1, NULL, 'a'), (2, NULL, 'b')"
         )
         await connection.commit()
     finally:
@@ -967,7 +976,7 @@ async def test_db_preview_table_tool(db_settings: DatabaseSettings, probe_graph:
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool(
-            "db_preview_table", {"table": "ja_pst_child", "schema": "public"}
+            "db_preview_table", {"table": "ja_postgres_child", "schema": "public"}
         )
 
     content = result.structured_content
@@ -981,25 +990,25 @@ async def test_db_list_indexes_handles_expression_and_include(
 ) -> None:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("CREATE TABLE ja_pst_idx (a int, b text, c int)")
+        await connection.execute("CREATE TABLE ja_postgres_idx (a int, b text, c int)")
         await connection.execute(
-            "CREATE INDEX ja_pst_idx_expr ON ja_pst_idx (a, lower(b)) INCLUDE (c)"
+            "CREATE INDEX ja_postgres_idx_expr ON ja_postgres_idx (a, lower(b)) INCLUDE (c)"
         )
         await connection.commit()
 
         server = create_server(_settings(db_settings))
 
         async with Client(server, raise_exceptions=True) as client:
-            result = await client.call_tool("db_list_indexes", {"table": "ja_pst_idx"})
+            result = await client.call_tool("db_list_indexes", {"table": "ja_postgres_idx"})
 
         index = next(
             item
             for item in result.structured_content["indexes"]
-            if item["name"] == "ja_pst_idx_expr"
+            if item["name"] == "ja_postgres_idx_expr"
         )
         assert index["columns"] == ["a", "lower(b)"]
     finally:
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_idx")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_idx")
         await connection.commit()
         await connection.close()
 
@@ -1009,18 +1018,18 @@ async def test_db_preview_table_requires_primary_key_end_to_end(
 ) -> None:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("CREATE TABLE ja_pst_no_pk (a int)")
+        await connection.execute("CREATE TABLE ja_postgres_no_pk (a int)")
         await connection.commit()
 
         server = create_server(_settings(db_settings))
 
         async with Client(server, raise_exceptions=True) as client:
-            result = await client.call_tool("db_preview_table", {"table": "ja_pst_no_pk"})
+            result = await client.call_tool("db_preview_table", {"table": "ja_postgres_no_pk"})
 
         assert result.is_error is True
         assert "primary key" in result.content[0].text
     finally:
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_no_pk")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_no_pk")
         await connection.commit()
         await connection.close()
 
@@ -1030,8 +1039,10 @@ async def test_db_preview_table_traverses_pages_with_bool_pk(
 ) -> None:
     connection = await _connect_writable(db_settings)
     try:
-        await connection.execute("CREATE TABLE ja_pst_bool_pk (flag bool PRIMARY KEY, note text)")
-        await connection.execute("INSERT INTO ja_pst_bool_pk VALUES (false, 'f'), (true, 't')")
+        await connection.execute(
+            "CREATE TABLE ja_postgres_bool_pk (flag bool PRIMARY KEY, note text)"
+        )
+        await connection.execute("INSERT INTO ja_postgres_bool_pk VALUES (false, 'f'), (true, 't')")
         await connection.commit()
 
         server = create_server(
@@ -1043,7 +1054,7 @@ async def test_db_preview_table_traverses_pages_with_bool_pk(
         async with Client(server, raise_exceptions=True) as client:
             while True:
                 arguments: dict[str, object] = {
-                    "table": "ja_pst_bool_pk",
+                    "table": "ja_postgres_bool_pk",
                     "schema": "public",
                     "page_size": 1,
                 }
@@ -1060,7 +1071,7 @@ async def test_db_preview_table_traverses_pages_with_bool_pk(
         assert sorted(seen) == ["f", "t"]
         assert len(seen) == len(set(seen))
     finally:
-        await connection.execute("DROP TABLE IF EXISTS ja_pst_bool_pk")
+        await connection.execute("DROP TABLE IF EXISTS ja_postgres_bool_pk")
         await connection.commit()
         await connection.close()
 

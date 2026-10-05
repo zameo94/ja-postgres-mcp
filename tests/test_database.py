@@ -13,9 +13,9 @@ import psycopg
 import pytest
 from psycopg import OperationalError
 
-from ja_pst_mcp import database as database_module
-from ja_pst_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
-from ja_pst_mcp.database import (
+from ja_postgres_mcp import database as database_module
+from ja_postgres_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
+from ja_postgres_mcp.database import (
     Database,
     DatabaseConnectionError,
     DatabaseError,
@@ -314,7 +314,7 @@ async def test_fetch_rows_caps_and_serializes(pool_spy: PoolSpy) -> None:
     assert result.row_count == 2
     assert result.truncated is True
     assert connection.cursor_instance.executed == [("SELECT amount FROM t", None)]
-    assert connection.cursor_instance.name.startswith("ja_pst_")
+    assert connection.cursor_instance.name.startswith("ja_postgres_")
 
 
 async def test_fetch_rows_reports_columns_for_empty_result(pool_spy: PoolSpy) -> None:

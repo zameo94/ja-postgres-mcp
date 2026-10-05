@@ -1,5 +1,5 @@
 services:
-  ja-pst-mcp:
+  ja-postgres-mcp:
     build: .
     env_file:
       - .env

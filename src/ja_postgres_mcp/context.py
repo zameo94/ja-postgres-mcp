@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ja_pst_mcp.config import QuerySettings
-from ja_pst_mcp.database import DatabaseProtocol
+from ja_postgres_mcp.config import QuerySettings
+from ja_postgres_mcp.database import DatabaseProtocol
 
 
 @dataclass(frozen=True, slots=True)
