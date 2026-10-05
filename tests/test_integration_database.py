@@ -1160,20 +1160,20 @@ async def test_demo_seed_prices_are_coherent(
     violations = [
         # The payment must equal the order total.
         """SELECT o.id
-           FROM orders AS o
-           JOIN order_items AS oi ON oi.order_id = o.id
-           JOIN payments AS p ON p.order_id = o.id
+           FROM demo.orders AS o
+           JOIN demo.order_items AS oi ON oi.order_id = o.id
+           JOIN demo.payments AS p ON p.order_id = o.id
            GROUP BY o.id, p.amount
            HAVING sum(oi.quantity * oi.unit_price) <> p.amount""",
         # The line price must equal the catalogue price.
         """SELECT oi.id
-           FROM order_items AS oi
-           JOIN products AS p ON p.id = oi.product_id
+           FROM demo.order_items AS oi
+           JOIN demo.products AS p ON p.id = oi.product_id
            WHERE oi.unit_price <> p.unit_price""",
         # An order must contain more than one distinct product, otherwise the
         # generator is degenerate and order_items carries no information.
         """SELECT order_id
-           FROM order_items
+           FROM demo.order_items
            GROUP BY order_id
            HAVING count(DISTINCT product_id) < 2""",
     ]
