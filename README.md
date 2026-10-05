@@ -35,6 +35,7 @@ discovered at runtime and never hardcoded. The server is consumed by the separat
 - [Repository layout](#repository-layout)
 - [Configuration](#configuration)
 - [Tests](#tests)
+- [Versioning](#versioning)
 - [MVP limitations](#mvp-limitations)
 - [License](#license)
 
@@ -365,6 +366,26 @@ poetry run ruff check .
 poetry run ruff format --check .
 poetry run mypy            # checks src/ only
 ```
+
+---
+
+## Versioning
+
+The project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
+It is currently `0.x`: the MCP tool contracts may still change between minor
+releases. `1.0.0` will mark those contracts as stable.
+
+The version is **single-sourced in `pyproject.toml`** (`[project].version`);
+`ja_postgres_mcp.__version__` is read from the installed distribution metadata,
+so there is no second copy to keep in sync. After changing the version, reinstall
+(`poetry install`) so the package metadata is regenerated — otherwise
+`__version__` keeps reporting the previous value.
+
+Releases are tagged `vX.Y.Z` (e.g. `v0.1.0`). To cut a release:
+
+1. bump `version` in `pyproject.toml`;
+2. reinstall so the metadata reflects the new version;
+3. tag the commit `vX.Y.Z`.
 
 ---
 

@@ -194,6 +194,17 @@ application authentication or `/api/...` endpoints — those belong to
 - **Never** run `git commit`, `git add`, `git status` or `git push`. The developer performs all git operations.
 - Branch naming style: `feature/<short-name>` (e.g. `feature/add-configuration`).
 - Do not create commits, amend history or push.
+- Never create tags or releases; the developer does (see Versioning and releases).
+
+## Versioning and releases
+
+- The project follows **Semantic Versioning**; while `0.x`, the MCP tool contracts
+  may still change between minor releases.
+- The version is **single-sourced in `pyproject.toml`** (`[project].version`).
+  Do not hardcode it anywhere else: `ja_postgres_mcp.__version__` is read from
+  the installed distribution metadata.
+- Release tags use the `vX.Y.Z` form (e.g. `v0.1.0`). Agents never create tags or
+  releases; the developer does. The README documents the release steps.
 
 ## Configuration and security
 
