@@ -27,6 +27,9 @@ pytestmark = pytest.mark.integration
 
 PROBE_TABLE = "ja_pst_probe"
 PROBE_VIEW = "ja_pst_probe_view"
+PROBE_MATVIEW = "ja_pst_probe_mv"
+PROBE_PARTITIONED = "ja_pst_probe_part"
+PROBE_PARTITION = "ja_pst_probe_part_p1"
 
 # Statements that must be impossible through the tool.
 WRITE_AND_DDL_STATEMENTS = [
@@ -118,7 +121,9 @@ async def probe_table(db_settings: DatabaseSettings) -> AsyncIterator[str]:
     connection = await _connect_writable(db_settings)
     try:
         await connection.execute(f"DROP TABLE IF EXISTS {PROBE_TABLE}")
-        await connection.execute(f"CREATE TABLE {PROBE_TABLE} (id int, note text)")
+        await connection.execute(
+            f"CREATE TABLE {PROBE_TABLE} (id int PRIMARY KEY, note text)"
+        )
         await connection.execute(f"INSERT INTO {PROBE_TABLE} VALUES (1, 'original')")
         await connection.commit()
         yield PROBE_TABLE
@@ -145,6 +150,51 @@ async def probe_view(
     finally:
         try:
             await connection.execute(f"DROP VIEW IF EXISTS {PROBE_VIEW}")
+            await connection.commit()
+        finally:
+            await connection.close()
+
+
+@pytest.fixture
+async def probe_matview(
+    db_settings: DatabaseSettings, probe_table: str
+) -> AsyncIterator[str]:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute(
+            f"CREATE MATERIALIZED VIEW {PROBE_MATVIEW} AS "
+            f"SELECT id, note FROM {probe_table}"
+        )
+        await connection.commit()
+        yield PROBE_MATVIEW
+    finally:
+        try:
+            await connection.execute(
+                f"DROP MATERIALIZED VIEW IF EXISTS {PROBE_MATVIEW}"
+            )
+            await connection.commit()
+        finally:
+            await connection.close()
+
+
+@pytest.fixture
+async def probe_partitioned(db_settings: DatabaseSettings) -> AsyncIterator[str]:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute(f"DROP TABLE IF EXISTS {PROBE_PARTITIONED} CASCADE")
+        await connection.execute(
+            f"CREATE TABLE {PROBE_PARTITIONED} (id int, note text) "
+            "PARTITION BY RANGE (id)"
+        )
+        await connection.execute(
+            f"CREATE TABLE {PROBE_PARTITION} PARTITION OF {PROBE_PARTITIONED} "
+            "FOR VALUES FROM (0) TO (100)"
+        )
+        await connection.commit()
+        yield PROBE_PARTITIONED
+    finally:
+        try:
+            await connection.execute(f"DROP TABLE IF EXISTS {PROBE_PARTITIONED} CASCADE")
             await connection.commit()
         finally:
             await connection.close()
@@ -481,6 +531,118 @@ async def test_db_list_tables_filters_by_kind(
     assert probe_view not in table_names
     assert probe_view in view_names
     assert probe_table not in view_names
+
+
+async def test_db_describe_table_tool_end_to_end(
+    db_settings: DatabaseSettings, probe_table: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_describe_table", {"table": probe_table, "schema": "public"}
+        )
+
+    content = result.structured_content
+    assert content["schema_name"] == "public"
+    assert content["name"] == probe_table
+    assert content["kind"] == "table"
+    assert [column["name"] for column in content["columns"]] == ["id", "note"]
+    assert content["primary_key"] == ["id"]
+    id_column = content["columns"][0]
+    assert id_column["data_type"] == "integer"
+    assert id_column["nullable"] is False
+    assert id_column["is_primary_key"] is True
+    assert content["truncated"] is False
+
+
+async def test_db_describe_table_resolves_schema(
+    db_settings: DatabaseSettings, probe_table: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_describe_table", {"table": probe_table})
+
+    assert result.structured_content["schema_name"] == "public"
+
+
+async def test_db_describe_table_reports_missing_table(
+    db_settings: DatabaseSettings,
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_describe_table", {"table": "ja_pst_does_not_exist"}
+        )
+
+    assert result.is_error is True
+    assert "not found" in result.content[0].text
+
+
+async def test_db_describe_table_view(
+    db_settings: DatabaseSettings, probe_view: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_describe_table", {"table": probe_view, "schema": "public"}
+        )
+
+    content = result.structured_content
+    assert content["kind"] == "view"
+    assert [column["name"] for column in content["columns"]] == ["id", "note"]
+    assert content["primary_key"] == []
+
+
+async def test_db_describe_table_matview(
+    db_settings: DatabaseSettings, probe_matview: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_describe_table", {"table": probe_matview, "schema": "public"}
+        )
+
+    content = result.structured_content
+    assert content["kind"] == "matview"
+    assert [column["name"] for column in content["columns"]] == ["id", "note"]
+
+
+async def test_db_describe_table_partitioned(
+    db_settings: DatabaseSettings, probe_partitioned: str
+) -> None:
+    settings = Settings(
+        database=db_settings, server=ServerSettings(), query=QuerySettings()
+    )
+    server = create_server(settings)
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_describe_table", {"table": probe_partitioned, "schema": "public"}
+        )
+
+    content = result.structured_content
+    assert content["kind"] == "table"
+    assert [column["name"] for column in content["columns"]] == ["id", "note"]
 
 
 async def test_db_list_tables_excludes_system_schemas(
