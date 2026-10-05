@@ -226,6 +226,11 @@ uv run pytest
 poetry install
 poetry run pytest
 
+# Lint / format / typecheck
+poetry run ruff check .
+poetry run ruff format --check .
+poetry run mypy   # checks src/ only (mypy config: files = ["src"])
+
 # Tests (developer-run only; agents must not execute)
 # Unit + integration run together; the integration tests provision a throwaway
 # PostgreSQL 15 automatically via testcontainers (Docker required).

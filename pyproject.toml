@@ -25,6 +25,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "testcontainers[postgres]>=4.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -37,3 +39,23 @@ asyncio_mode = "auto"
 markers = [
     "integration: requires a PostgreSQL provisioned automatically by testcontainers",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "BLE"]
+ignore = ["SIM117"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+ignore_missing_imports = true

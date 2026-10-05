@@ -14,9 +14,7 @@ SCOPE = cursor_scope("db_list_tables", {"schema": "public", "kind": None})
 
 
 def _token(payload: dict) -> str:
-    return (
-        base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-    )
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
 
 
 def test_cursor_roundtrip() -> None:
@@ -36,6 +34,11 @@ def test_cursor_is_url_safe_and_unpadded() -> None:
 def test_decode_rejects_malformed_cursor() -> None:
     with pytest.raises(InvalidQueryError, match="invalid pagination cursor"):
         decode_cursor("!!!not-base64!!!", 1, SCOPE)
+
+
+def test_decode_rejects_overlong_cursor() -> None:
+    with pytest.raises(InvalidQueryError, match="invalid pagination cursor"):
+        decode_cursor("a" * 600, 1, SCOPE)
 
 
 def test_decode_rejects_unsupported_version() -> None:

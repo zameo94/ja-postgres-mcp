@@ -290,9 +290,7 @@ _DESCRIBE_COLUMNS_SQL = (
 )
 
 
-def build_describe_columns_query(
-    schema: str, table: str
-) -> tuple[str, list[object]]:
+def build_describe_columns_query(schema: str, table: str) -> tuple[str, list[object]]:
     """Build the query listing the columns of a resolved relation."""
     return _DESCRIBE_COLUMNS_SQL + " ORDER BY a.attnum", [schema, table]
 
@@ -524,9 +522,6 @@ def build_preview_rows_query(
         placeholders = ", ".join(["%s"] * len(pk_columns))
         where = f" WHERE ({', '.join(pk_text)}) > ({placeholders})"
         params.extend(cursor)
-    query = (
-        f"SELECT {select_key}, * FROM {table_ref}{where} "
-        f"ORDER BY {', '.join(pk_text)} LIMIT %s"
-    )
+    query = f"SELECT {select_key}, * FROM {table_ref}{where} ORDER BY {', '.join(pk_text)} LIMIT %s"
     params.append(page_size + 1)
     return query, params

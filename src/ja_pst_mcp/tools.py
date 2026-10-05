@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
@@ -122,7 +122,7 @@ class QueryOutput(BaseModel):
 
 def _tool_error(tool_name: str, exc: DatabaseError) -> ToolError:
     """Log a real database failure and return a safe client error."""
-    logger.warning("database error while running tool %s", tool_name, exc_info=True)
+    logger.warning("database error while running tool %s", tool_name, exc_info=exc)
     message = (
         DATABASE_UNAVAILABLE_MESSAGE
         if isinstance(exc, DatabaseConnectionError)
@@ -186,9 +186,7 @@ async def db_list_schemas(
         page = _resolve_page_size(page_size, context.query)
         scope = cursor_scope("db_list_schemas", {})
         key = decode_cursor(cursor, 1, scope) if cursor is not None else None
-        query, params = build_list_schemas_query(
-            context.query.allowed_schemas, page, key
-        )
+        query, params = build_list_schemas_query(context.query.allowed_schemas, page, key)
         result = await context.database.fetch_rows(query, params, max_rows=page + 1)
     except InvalidQueryError as exc:
         raise ToolError(str(exc)) from exc
@@ -199,9 +197,7 @@ async def db_list_schemas(
     has_more = len(schemas) > page
     items = schemas[:page]
     next_cursor = encode_cursor((items[-1].name,), scope) if has_more else None
-    return SchemaListOutput(
-        schemas=items, next_cursor=next_cursor, row_count=len(items)
-    )
+    return SchemaListOutput(schemas=items, next_cursor=next_cursor, row_count=len(items))
 
 
 def _schema_infos(result: QueryResult) -> list[SchemaInfo]:
@@ -238,9 +234,7 @@ async def db_list_tables(
     has_more = len(tables) > page
     items = tables[:page]
     next_cursor = (
-        encode_cursor((items[-1].schema_name, items[-1].name), scope)
-        if has_more
-        else None
+        encode_cursor((items[-1].schema_name, items[-1].name), scope) if has_more else None
     )
     return TableListOutput(tables=items, next_cursor=next_cursor, row_count=len(items))
 
@@ -312,12 +306,12 @@ def _require_single(kind: str, name: str, result: QueryResult) -> None:
         raise AmbiguousTableError(_ambiguous_message(kind, name, result))
 
 
-def _resolved_relation(table: str, result: QueryResult) -> tuple[str, str, str]:
+def _resolved_relation(table: str, result: QueryResult) -> tuple[str, str, TableKind]:
     if result.columns != ("schema_name", "name", "kind"):
         raise RuntimeError("unexpected table resolution result shape")
     _require_single("table", table, result)
     row = result.rows[0]
-    return row[0], row[1], row[2]
+    return row[0], row[1], cast(TableKind, row[2])
 
 
 def _column_infos(result: QueryResult) -> list[ColumnInfo]:
@@ -373,15 +367,11 @@ async def db_list_constraints(
     has_more = len(constraints) > page
     items = constraints[:page]
     next_cursor = (
-        encode_cursor(
-            (items[-1].schema_name, items[-1].table_name, items[-1].name), scope
-        )
+        encode_cursor((items[-1].schema_name, items[-1].table_name, items[-1].name), scope)
         if has_more
         else None
     )
-    return ConstraintListOutput(
-        constraints=items, next_cursor=next_cursor, row_count=len(items)
-    )
+    return ConstraintListOutput(constraints=items, next_cursor=next_cursor, row_count=len(items))
 
 
 def _constraint_infos(result: QueryResult) -> list[ConstraintInfo]:
@@ -412,9 +402,7 @@ async def db_list_relationships(
         page = _resolve_page_size(page_size, context.query)
         if schema is not None:
             _ensure_schema_allowed(schema, context.query.allowed_schemas)
-        scope = cursor_scope(
-            "db_list_relationships", {"schema": schema, "table": table}
-        )
+        scope = cursor_scope("db_list_relationships", {"schema": schema, "table": table})
         key = decode_cursor(cursor, 3, scope) if cursor is not None else None
         query, params = build_list_relationships_query(
             context.query.allowed_schemas, page, schema, table, key
@@ -429,9 +417,7 @@ async def db_list_relationships(
     has_more = len(relationships) > page
     items = relationships[:page]
     next_cursor = (
-        encode_cursor(
-            (items[-1].source_schema, items[-1].source_table, items[-1].name), scope
-        )
+        encode_cursor((items[-1].source_schema, items[-1].source_table, items[-1].name), scope)
         if has_more
         else None
     )
@@ -535,9 +521,7 @@ async def db_get_view_definition(
     try:
         if schema is not None:
             _ensure_schema_allowed(schema, context.query.allowed_schemas)
-        query, params = build_get_view_definition_query(
-            context.query.allowed_schemas, view, schema
-        )
+        query, params = build_get_view_definition_query(context.query.allowed_schemas, view, schema)
         result = await context.database.fetch_rows(query, params)
         return _view_definition(view, result)
     except InvalidQueryError as exc:
@@ -551,9 +535,7 @@ def _view_definition(view: str, result: QueryResult) -> ViewDefinitionOutput:
         raise RuntimeError("unexpected view definition result shape")
     _require_single("view", view, result)
     row = result.rows[0]
-    return ViewDefinitionOutput(
-        schema_name=row[0], name=row[1], kind=row[2], definition=row[3]
-    )
+    return ViewDefinitionOutput(schema_name=row[0], name=row[1], kind=row[2], definition=row[3])
 
 
 async def db_preview_table(
@@ -575,20 +557,10 @@ async def db_preview_table(
         resolved = await context.database.fetch_rows(resolve_query, resolve_params)
         schema_name, name, _kind, pk_columns = _preview_relation(table, resolved)
         if not pk_columns:
-            raise InvalidQueryError(
-                "relation has no primary key; row pagination is not available"
-            )
-        scope = cursor_scope(
-            "db_preview_table", {"schema": schema_name, "table": name}
-        )
-        key = (
-            decode_cursor(cursor, len(pk_columns), scope)
-            if cursor is not None
-            else None
-        )
-        query, params = build_preview_rows_query(
-            schema_name, name, tuple(pk_columns), page, key
-        )
+            raise InvalidQueryError("relation has no primary key; row pagination is not available")
+        scope = cursor_scope("db_preview_table", {"schema": schema_name, "table": name})
+        key = decode_cursor(cursor, len(pk_columns), scope) if cursor is not None else None
+        query, params = build_preview_rows_query(schema_name, name, tuple(pk_columns), page, key)
         result = await context.database.fetch_rows(query, params, max_rows=page + 1)
     except InvalidQueryError as exc:
         raise ToolError(str(exc)) from exc
@@ -611,9 +583,7 @@ async def db_preview_table(
     )
 
 
-def _preview_relation(
-    table: str, result: QueryResult
-) -> tuple[str, str, str, list[str]]:
+def _preview_relation(table: str, result: QueryResult) -> tuple[str, str, str, list[str]]:
     if result.columns != ("schema_name", "name", "kind", "pk_columns"):
         raise RuntimeError("unexpected preview resolution result shape")
     _require_single("table", table, result)

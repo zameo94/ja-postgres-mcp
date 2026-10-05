@@ -51,9 +51,7 @@ class FakeDatabase:
         self.settings = settings
         self._ping_error = ping_error
         self._query_result = query_result
-        self._query_results = (
-            deque(query_results) if query_results is not None else None
-        )
+        self._query_results = deque(query_results) if query_results is not None else None
         self._query_error = query_error
         self._raise_on_query_call = raise_on_query_call
         self.opened = False
@@ -77,8 +75,7 @@ class FakeDatabase:
     ) -> QueryResult:
         self.calls.append((query, params))
         if self._query_error is not None and (
-            self._raise_on_query_call is None
-            or len(self.calls) == self._raise_on_query_call
+            self._raise_on_query_call is None or len(self.calls) == self._raise_on_query_call
         ):
             raise self._query_error
         if self._query_results is not None:
@@ -91,9 +88,7 @@ class FakeDatabase:
 def make_factory(
     created: dict[str, FakeDatabase], **database_kwargs: Any
 ) -> Callable[[DatabaseSettings, QuerySettings], FakeDatabase]:
-    def factory(
-        database_settings: DatabaseSettings, query_settings: QuerySettings
-    ) -> FakeDatabase:
+    def factory(database_settings: DatabaseSettings, query_settings: QuerySettings) -> FakeDatabase:
         created["database"] = FakeDatabase(database_settings, **database_kwargs)
         return created["database"]
 
@@ -180,9 +175,7 @@ async def test_db_run_read_only_query_returns_structured_result(
 
     async with Client(server, raise_exceptions=True) as client:
         listing = await client.list_tools()
-        tool = next(
-            item for item in listing.tools if item.name == "db_run_read_only_query"
-        )
+        tool = next(item for item in listing.tools if item.name == "db_run_read_only_query")
         assert tool.title == "Run read-only query"
         assert tool.annotations is not None
         assert tool.annotations.read_only_hint is True
@@ -226,9 +219,7 @@ async def test_db_run_read_only_query_reports_invalid_query(settings: Settings) 
     server = create_server(settings, database_factory=make_factory(created, query_error=error))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_run_read_only_query", {"sql": "SELECT 1; SELECT 2"}
-        )
+        result = await client.call_tool("db_run_read_only_query", {"sql": "SELECT 1; SELECT 2"})
 
     assert result.is_error is True
     assert "only a single statement is allowed" in result.content[0].text
@@ -317,9 +308,7 @@ async def test_db_list_schemas_paginates(settings: Settings) -> None:
     content = result.structured_content
     assert [schema["name"] for schema in content["schemas"]] == ["a", "b"]
     assert content["row_count"] == 2
-    assert decode_cursor(
-        content["next_cursor"], 1, cursor_scope("db_list_schemas", {})
-    ) == ("b",)
+    assert decode_cursor(content["next_cursor"], 1, cursor_scope("db_list_schemas", {})) == ("b",)
 
 
 async def test_db_list_schemas_passes_allowlist(settings: Settings) -> None:
@@ -531,7 +520,7 @@ def test_build_resolve_table_query_with_schema() -> None:
 
 
 def test_build_resolve_table_query_with_allowlist() -> None:
-    query, params = build_resolve_table_query(("public",), "t")
+    _query, params = build_resolve_table_query(("public",), "t")
 
     assert params == ["t", ["public"]]
 
@@ -577,9 +566,7 @@ async def test_db_describe_table_returns_columns(settings: Settings) -> None:
             ("name", 2, "text", True, "'x'::text", False, "display name"),
         ),
     )
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         listing = await client.list_tools()
@@ -622,9 +609,7 @@ async def test_db_describe_table_returns_columns(settings: Settings) -> None:
 async def test_db_describe_table_reports_missing_table(settings: Settings) -> None:
     created: dict[str, FakeDatabase] = {}
     results = _describe_query_results((), ())
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_describe_table", {"table": "nope"})
@@ -635,12 +620,8 @@ async def test_db_describe_table_reports_missing_table(settings: Settings) -> No
 
 async def test_db_describe_table_reports_ambiguous_table(settings: Settings) -> None:
     created: dict[str, FakeDatabase] = {}
-    results = _describe_query_results(
-        (("a", "t", "table"), ("b", "t", "table")), ()
-    )
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    results = _describe_query_results((("a", "t", "table"), ("b", "t", "table")), ())
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_describe_table", {"table": "t"})
@@ -657,9 +638,7 @@ async def test_db_describe_table_rejects_schema_outside_allowlist(
     server = create_server(configured, database_factory=make_factory(created))
 
     async with Client(server, raise_exceptions=True) as client:
-        result = await client.call_tool(
-            "db_describe_table", {"table": "t", "schema": "sales"}
-        )
+        result = await client.call_tool("db_describe_table", {"table": "t", "schema": "sales"})
 
     assert result.is_error is True
     assert "not in the allowed schemas" in result.content[0].text
@@ -669,9 +648,7 @@ async def test_db_describe_table_rejects_schema_outside_allowlist(
 async def test_db_describe_table_reports_missing_columns(settings: Settings) -> None:
     created: dict[str, FakeDatabase] = {}
     results = _describe_query_results((("public", "t", "table"),), ())
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_describe_table", {"table": "t"})
@@ -684,9 +661,7 @@ async def test_db_describe_table_bounds_ambiguous_schemas(settings: Settings) ->
     created: dict[str, FakeDatabase] = {}
     rows = tuple((f"s{index}", "t", "table") for index in range(8))
     results = _describe_query_results(rows, ())
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_describe_table", {"table": "t"})
@@ -736,11 +711,7 @@ async def test_db_describe_table_maps_error_on_second_query(
     settings: Settings,
 ) -> None:
     created: dict[str, FakeDatabase] = {}
-    results = [
-        QueryResult(
-            ("schema_name", "name", "kind"), (("public", "t", "table"),), 1, False
-        )
-    ]
+    results = [QueryResult(("schema_name", "name", "kind"), (("public", "t", "table"),), 1, False)]
     server = create_server(
         settings,
         database_factory=make_factory(
@@ -765,32 +736,36 @@ def test_build_list_constraints_query_binds_filters_and_cursor() -> None:
 
     assert params == [["public"], "public", "t", "public", "t", "c", 201]
     assert query.count("%s") == 7
+    assert "conparentid = 0" in query
 
 
 def test_build_list_relationships_query_binds_filters_and_cursor() -> None:
-    query, params = build_list_relationships_query(
+    _query, params = build_list_relationships_query(
         (), 50, schema="public", cursor=("public", "t", "fk")
     )
 
     assert params == ["public", "public", "t", "fk", 51]
+    assert "sn.nspname <> 'information_schema'" in _query
+    assert "tn.nspname <> 'information_schema'" in _query
 
 
 def test_build_list_indexes_query_binds_filters_and_cursor() -> None:
-    query, params = build_list_indexes_query(
-        (), 50, table="t", cursor=("public", "t", "idx")
-    )
+    _query, params = build_list_indexes_query((), 50, table="t", cursor=("public", "t", "idx"))
 
     assert params == ["t", "public", "t", "idx", 51]
+    assert "generate_series(1, i.indnkeyatts)" in _query
+    assert "pg_get_indexdef(i.indexrelid, k.ord, true)" in _query
 
 
 def test_build_get_view_definition_query_binds_filters() -> None:
-    query, params = build_get_view_definition_query(("public",), "v", "public")
+    _query, params = build_get_view_definition_query(("public",), "v", "public")
 
     assert params == ["v", "public", ["public"]]
+    assert "pg_get_viewdef" in _query
 
 
 def test_build_preview_resolve_query_binds_filters() -> None:
-    query, params = build_preview_resolve_query(("public",), "t", "public")
+    _query, params = build_preview_resolve_query(("public",), "t", "public")
 
     assert params == ["t", "public", ["public"]]
 
@@ -800,8 +775,7 @@ def test_build_preview_rows_query_orders_by_pk_text() -> None:
 
     assert params == [201]
     assert query == (
-        'SELECT "id"::text AS "__pk_0", * FROM "public"."t" '
-        'ORDER BY "id"::text LIMIT %s'
+        'SELECT "id"::text AS "__pk_0", * FROM "public"."t" ORDER BY "id"::text LIMIT %s'
     )
 
 
@@ -950,9 +924,7 @@ async def test_db_get_view_definition_returns_definition(settings: Settings) -> 
 
 async def test_db_get_view_definition_reports_missing(settings: Settings) -> None:
     created: dict[str, FakeDatabase] = {}
-    query_result = QueryResult(
-        ("schema_name", "name", "kind", "definition"), (), 0, False
-    )
+    query_result = QueryResult(("schema_name", "name", "kind", "definition"), (), 0, False)
     server = create_server(
         settings, database_factory=make_factory(created, query_result=query_result)
     )
@@ -975,9 +947,7 @@ async def test_db_preview_table_returns_rows(settings: Settings) -> None:
         ),
         QueryResult(("__pk_0", "id", "note"), (("1", 1, "a"),), 1, False),
     ]
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_preview_table", {"table": "t"})
@@ -1000,9 +970,7 @@ async def test_db_preview_table_requires_primary_key(settings: Settings) -> None
             False,
         )
     ]
-    server = create_server(
-        settings, database_factory=make_factory(created, query_results=results)
-    )
+    server = create_server(settings, database_factory=make_factory(created, query_results=results))
 
     async with Client(server, raise_exceptions=True) as client:
         result = await client.call_tool("db_preview_table", {"table": "t"})
