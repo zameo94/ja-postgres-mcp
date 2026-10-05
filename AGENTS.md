@@ -71,10 +71,10 @@ application authentication or `/api/...` endpoints — those belong to
 
 1. Read-only query foundation (limits config + `Database.fetch_rows`). **Done.**
 2. `db_run_read_only_query` (core analysis tool) and `db_health`. **Done.**
-3. Discovery tools (in progress): `db_list_schemas`, `db_list_tables`,
-   `db_describe_table` **done**; next constraints/relationships/indexes,
-   `db_get_view_definition`.
-4. `db_preview_table`.
+3. Discovery tools: `db_list_schemas`, `db_list_tables`, `db_describe_table`,
+   `db_list_constraints`, `db_list_relationships`, `db_list_indexes`,
+   `db_get_view_definition`. **Done.**
+4. `db_preview_table`. **Done.**
 
 ## Query engine design (MVP)
 
@@ -98,6 +98,9 @@ application authentication or `/api/...` endpoints — those belong to
     `page_size` + opaque `cursor`; output is the tool's item list (`schemas`,
     `tables`, ...) plus `row_count` (items in this page) and `next_cursor`.
     No `all`, no `truncated`. The consumer must request page after page.
+  - **exception**: `db_preview_table` returns row data (`columns`/`rows`) *and*
+    discovery-style pagination (`next_cursor`/`row_count`); it intentionally
+    combines both shapes (keyset on the primary key, ordered by its text form).
 - Discovery pagination rules:
   - stable, deterministic ordering (keyset); **no OFFSET**;
   - `page_size` bounded by a hard maximum (`JA_PST_DISCOVERY_MAX_PAGE_SIZE`,

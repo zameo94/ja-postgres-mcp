@@ -837,3 +837,296 @@ async def test_open_wraps_unreachable_database() -> None:
 
     with pytest.raises(DatabaseConnectionError):
         await database.open()
+
+
+@pytest.fixture
+async def probe_graph(db_settings: DatabaseSettings) -> AsyncIterator[None]:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute("DROP VIEW IF EXISTS ja_pst_child_view")
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_child CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_parent CASCADE")
+        await connection.execute(
+            "CREATE TABLE ja_pst_parent (id int PRIMARY KEY, label text UNIQUE)"
+        )
+        await connection.execute(
+            "CREATE TABLE ja_pst_child (id int PRIMARY KEY, "
+            "parent_id int REFERENCES ja_pst_parent(id), note text CHECK (note <> ''))"
+        )
+        await connection.execute(
+            "CREATE INDEX ja_pst_child_note_idx ON ja_pst_child (note)"
+        )
+        await connection.execute(
+            "CREATE VIEW ja_pst_child_view AS SELECT id, note FROM ja_pst_child"
+        )
+        await connection.commit()
+        yield
+    finally:
+        await connection.execute("DROP VIEW IF EXISTS ja_pst_child_view")
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_child CASCADE")
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_parent CASCADE")
+        await connection.commit()
+        await connection.close()
+
+
+def _settings(db_settings: DatabaseSettings, **query: object) -> Settings:
+    return Settings(
+        database=db_settings,
+        server=ServerSettings(),
+        query=QuerySettings(**query),
+    )
+
+
+async def test_db_list_constraints_tool(
+    db_settings: DatabaseSettings, probe_graph: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_list_constraints", {"schema": "public", "table": "ja_pst_child"}
+        )
+
+    kinds = {constraint["kind"] for constraint in result.structured_content["constraints"]}
+    assert {"primary_key", "foreign_key", "check"}.issubset(kinds)
+
+
+async def test_db_list_constraints_reports_unique(
+    db_settings: DatabaseSettings, probe_graph: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_list_constraints", {"table": "ja_pst_parent"}
+        )
+
+    kinds = {constraint["kind"] for constraint in result.structured_content["constraints"]}
+    assert "unique" in kinds
+    assert "primary_key" in kinds
+
+
+async def test_db_list_constraints_skips_partition_clones(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_part CASCADE")
+        await connection.execute(
+            "CREATE TABLE ja_pst_part (id int PRIMARY KEY, note text) "
+            "PARTITION BY RANGE (id)"
+        )
+        await connection.execute(
+            "CREATE TABLE ja_pst_part_p1 PARTITION OF ja_pst_part "
+            "FOR VALUES FROM (0) TO (100)"
+        )
+        await connection.execute(
+            "CREATE TABLE ja_pst_part_p2 PARTITION OF ja_pst_part "
+            "FOR VALUES FROM (100) TO (200)"
+        )
+        await connection.commit()
+
+        server = create_server(_settings(db_settings))
+
+        async with Client(server, raise_exceptions=True) as client:
+            result = await client.call_tool("db_list_constraints", {})
+
+        tables = {item["table_name"] for item in result.structured_content["constraints"]}
+        assert "ja_pst_part" in tables
+        assert "ja_pst_part_p1" not in tables
+        assert "ja_pst_part_p2" not in tables
+    finally:
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_part CASCADE")
+        await connection.commit()
+        await connection.close()
+
+
+async def test_db_list_relationships_tool(
+    db_settings: DatabaseSettings, probe_graph: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_list_relationships", {"table": "ja_pst_child"}
+        )
+
+    relationships = result.structured_content["relationships"]
+    assert any(item["target_table"] == "ja_pst_parent" for item in relationships)
+
+
+async def test_db_list_indexes_tool(
+    db_settings: DatabaseSettings, probe_graph: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_list_indexes", {"table": "ja_pst_child"})
+
+    indexes = result.structured_content["indexes"]
+    note_index = next(
+        item for item in indexes if item["name"] == "ja_pst_child_note_idx"
+    )
+    assert note_index["columns"] == ["note"]
+    assert note_index["method"] == "btree"
+
+
+async def test_db_get_view_definition_tool(
+    db_settings: DatabaseSettings, probe_graph: None
+) -> None:
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_get_view_definition",
+            {"view": "ja_pst_child_view", "schema": "public"},
+        )
+
+    assert result.structured_content["kind"] == "view"
+    assert "ja_pst_child" in result.structured_content["definition"]
+
+
+async def test_db_preview_table_tool(
+    db_settings: DatabaseSettings, probe_graph: None
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute(
+            "INSERT INTO ja_pst_child (id, parent_id, note) "
+            "VALUES (1, NULL, 'a'), (2, NULL, 'b')"
+        )
+        await connection.commit()
+    finally:
+        await connection.close()
+
+    server = create_server(_settings(db_settings))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "db_preview_table", {"table": "ja_pst_child", "schema": "public"}
+        )
+
+    content = result.structured_content
+    assert content["columns"] == ["id", "parent_id", "note"]
+    assert content["rows"] == [[1, None, "a"], [2, None, "b"]]
+    assert content["next_cursor"] is None
+
+
+async def test_db_list_indexes_handles_expression_and_include(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute("CREATE TABLE ja_pst_idx (a int, b text, c int)")
+        await connection.execute(
+            "CREATE INDEX ja_pst_idx_expr ON ja_pst_idx (a, lower(b)) INCLUDE (c)"
+        )
+        await connection.commit()
+
+        server = create_server(_settings(db_settings))
+
+        async with Client(server, raise_exceptions=True) as client:
+            result = await client.call_tool("db_list_indexes", {"table": "ja_pst_idx"})
+
+        index = next(
+            item
+            for item in result.structured_content["indexes"]
+            if item["name"] == "ja_pst_idx_expr"
+        )
+        assert index["columns"] == ["a", "lower(b)"]
+    finally:
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_idx")
+        await connection.commit()
+        await connection.close()
+
+
+async def test_db_preview_table_requires_primary_key_end_to_end(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute("CREATE TABLE ja_pst_no_pk (a int)")
+        await connection.commit()
+
+        server = create_server(_settings(db_settings))
+
+        async with Client(server, raise_exceptions=True) as client:
+            result = await client.call_tool("db_preview_table", {"table": "ja_pst_no_pk"})
+
+        assert result.is_error is True
+        assert "primary key" in result.content[0].text
+    finally:
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_no_pk")
+        await connection.commit()
+        await connection.close()
+
+
+async def test_db_preview_table_traverses_pages_with_bool_pk(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute(
+            "CREATE TABLE ja_pst_bool_pk (flag bool PRIMARY KEY, note text)"
+        )
+        await connection.execute(
+            "INSERT INTO ja_pst_bool_pk VALUES (false, 'f'), (true, 't')"
+        )
+        await connection.commit()
+
+        server = create_server(
+            _settings(db_settings, discovery_page_size=1, discovery_max_page_size=10)
+        )
+
+        seen: list[str] = []
+        cursor: str | None = None
+        async with Client(server, raise_exceptions=True) as client:
+            while True:
+                arguments: dict[str, object] = {
+                    "table": "ja_pst_bool_pk",
+                    "schema": "public",
+                    "page_size": 1,
+                }
+                if cursor is not None:
+                    arguments["cursor"] = cursor
+                result = await client.call_tool("db_preview_table", arguments)
+                content = result.structured_content
+                assert content["row_count"] <= 1
+                seen.extend(row[1] for row in content["rows"])
+                cursor = content["next_cursor"]
+                if cursor is None:
+                    break
+
+        assert sorted(seen) == ["f", "t"]
+        assert len(seen) == len(set(seen))
+    finally:
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_bool_pk")
+        await connection.commit()
+        await connection.close()
+
+
+async def test_db_preview_table_quotes_identifiers_end_to_end(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute(
+            'CREATE TABLE "Weird Table" ("select" int PRIMARY KEY, "a""b" text)'
+        )
+        await connection.execute("INSERT INTO \"Weird Table\" VALUES (1, 'x')")
+        await connection.commit()
+
+        server = create_server(_settings(db_settings))
+
+        async with Client(server, raise_exceptions=True) as client:
+            result = await client.call_tool(
+                "db_preview_table", {"table": "Weird Table", "schema": "public"}
+            )
+
+        content = result.structured_content
+        assert content["columns"] == ["select", 'a"b']
+        assert content["rows"] == [[1, "x"]]
+    finally:
+        await connection.execute('DROP TABLE IF EXISTS "Weird Table"')
+        await connection.commit()
+        await connection.close()
