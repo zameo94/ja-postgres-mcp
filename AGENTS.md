@@ -149,6 +149,19 @@ application authentication or `/api/...` endpoints — those belong to
 - No SQL injection surface in our code: dynamic values only via driver params.
 - Never return sensitive data to the client; keep server logs sanitized.
 
+### Least-privilege role
+
+- `db/roles/least_privilege.sql` is the reference script an operator runs **once**
+  as a DBA to create the read-only role the server connects with. The server
+  never creates roles.
+- It grants `CONNECT`, `USAGE` on the listed schemas and `SELECT` on their
+  tables (plus default privileges for future tables) and nothing else; it does
+  not grant write/DDL or dangerous `EXECUTE`.
+- Integration tests connect as a least-privilege role and assert the role
+  boundary (can read, cannot write/DDL), independently of the READ ONLY
+  transaction.
+- The README documents deployment with this role at the documentation stage.
+
 ## MCP server
 
 - The server is a standalone service exposed over **MCP Streamable HTTP**
