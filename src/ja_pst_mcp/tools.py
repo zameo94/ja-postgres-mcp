@@ -79,10 +79,8 @@ class QueryOutput(BaseModel):
 
 
 def _tool_error(tool_name: str, exc: DatabaseError) -> ToolError:
-    """Log the database error for diagnostics and return a safe client error."""
+    """Log a real database failure and return a safe client error."""
     logger.warning("database error while running tool %s", tool_name, exc_info=True)
-    if isinstance(exc, InvalidQueryError):
-        return ToolError(str(exc))
     message = (
         DATABASE_UNAVAILABLE_MESSAGE
         if isinstance(exc, DatabaseConnectionError)
@@ -123,6 +121,8 @@ async def db_run_read_only_query(
     database = ctx.request_context.lifespan_context.database
     try:
         result = await database.fetch_rows(sql, params)
+    except InvalidQueryError as exc:
+        raise ToolError(str(exc)) from exc
     except DatabaseError as exc:
         raise _tool_error("db_run_read_only_query", exc) from exc
     return QueryOutput(
@@ -140,14 +140,16 @@ async def db_list_schemas(
 ) -> SchemaListOutput:
     """List database schemas visible to the server (read-only, paginated)."""
     context = ctx.request_context.lifespan_context
-    page = _resolve_page_size(page_size, context.query)
-    scope = cursor_scope("db_list_schemas", {})
-    key = decode_cursor(cursor, 1, scope) if cursor is not None else None
     try:
+        page = _resolve_page_size(page_size, context.query)
+        scope = cursor_scope("db_list_schemas", {})
+        key = decode_cursor(cursor, 1, scope) if cursor is not None else None
         query, params = build_list_schemas_query(
             context.query.allowed_schemas, page, key
         )
         result = await context.database.fetch_rows(query, params, max_rows=page + 1)
+    except InvalidQueryError as exc:
+        raise ToolError(str(exc)) from exc
     except DatabaseError as exc:
         raise _tool_error("db_list_schemas", exc) from exc
 
@@ -175,16 +177,18 @@ async def db_list_tables(
 ) -> TableListOutput:
     """List tables, views, materialized views and foreign tables (paginated)."""
     context = ctx.request_context.lifespan_context
-    page = _resolve_page_size(page_size, context.query)
-    if schema is not None:
-        _ensure_schema_allowed(schema, context.query.allowed_schemas)
-    scope = cursor_scope("db_list_tables", {"schema": schema, "kind": kind})
-    key = decode_cursor(cursor, 2, scope) if cursor is not None else None
     try:
+        page = _resolve_page_size(page_size, context.query)
+        if schema is not None:
+            _ensure_schema_allowed(schema, context.query.allowed_schemas)
+        scope = cursor_scope("db_list_tables", {"schema": schema, "kind": kind})
+        key = decode_cursor(cursor, 2, scope) if cursor is not None else None
         query, params = build_list_tables_query(
             context.query.allowed_schemas, page, schema=schema, kind=kind, cursor=key
         )
         result = await context.database.fetch_rows(query, params, max_rows=page + 1)
+    except InvalidQueryError as exc:
+        raise ToolError(str(exc)) from exc
     except DatabaseError as exc:
         raise _tool_error("db_list_tables", exc) from exc
 
@@ -220,9 +224,9 @@ async def db_describe_table(
 ) -> DescribeTableOutput:
     """Describe a table or view (columns, types, nullability, defaults, PK)."""
     context = ctx.request_context.lifespan_context
-    if schema is not None:
-        _ensure_schema_allowed(schema, context.query.allowed_schemas)
     try:
+        if schema is not None:
+            _ensure_schema_allowed(schema, context.query.allowed_schemas)
         resolve_query, resolve_params = build_resolve_table_query(
             context.query.allowed_schemas, table, schema
         )
@@ -236,6 +240,8 @@ async def db_describe_table(
             raise InvalidQueryError("relation has too many columns to describe")
         if columns_result.row_count == 0:
             raise TableNotFoundError(f"table {schema_name}.{name} not found")
+    except InvalidQueryError as exc:
+        raise ToolError(str(exc)) from exc
     except DatabaseError as exc:
         raise _tool_error("db_describe_table", exc) from exc
 
