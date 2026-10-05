@@ -69,16 +69,7 @@ application authentication or `/api/...` endpoints — those belong to
 - A PostgreSQL **least-privilege, read-only role** is the real security
   boundary and is required in deployment (see Security requirements).
 
-### MVP roadmap (build order)
-
-1. Read-only query foundation (limits config + `Database.fetch_rows`). **Done.**
-2. `db_run_read_only_query` (core analysis tool) and `db_health`. **Done.**
-3. Discovery tools: `db_list_schemas`, `db_list_tables`, `db_describe_table`,
-   `db_list_constraints`, `db_list_relationships`, `db_list_indexes`,
-   `db_get_view_definition`. **Done.**
-4. `db_preview_table`. **Done.**
-
-## Query engine design (MVP)
+## Query engine design
 
 - `db_run_read_only_query` takes `sql: str` and optional `params` (positional
   list or named mapping). Values always go through the driver's
@@ -162,7 +153,7 @@ application authentication or `/api/...` endpoints — those belong to
 - Integration tests connect as a least-privilege role and assert the role
   boundary (can read, cannot write/DDL), independently of the READ ONLY
   transaction.
-- The README documents deployment with this role at the documentation stage.
+- The README documents deployment with this role.
 
 ## MCP server
 
@@ -182,9 +173,9 @@ application authentication or `/api/...` endpoints — those belong to
 - The health check stays a basic connectivity/health check. PostgreSQL version
   detection may be surfaced as diagnostic information but must not make the
   health check unnecessarily complex.
-- The supported version range is documented in the README (at documentation
-  stage) and covered by integration tests, with a PostgreSQL 15 baseline,
-  wherever version-specific behavior exists.
+- The supported version range is documented in the README and covered by
+  integration tests, with a PostgreSQL 15 baseline, wherever version-specific
+  behavior exists.
 - When adding a database-related MCP tool, explicitly verify that its SQL and
   PostgreSQL APIs work on the minimum supported version (15).
 
@@ -196,7 +187,7 @@ application authentication or `/api/...` endpoints — those belong to
 4. **Do NOT build or run Docker** (`docker build`, `docker run`). Configure only.
 5. After each step, stop and wait for explicit approval before the next step.
 6. Never claim tests pass if they were not executed.
-7. Do **not** modify `README.md` during implementation; documentation is done at the end.
+7. Keep `README.md` in sync when user-facing behavior changes.
 
 ## Git rules
 
