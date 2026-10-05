@@ -46,6 +46,8 @@ application authentication or `/api/...` endpoints — those belong to
 - Naming: analysis/discovery tools use the `db_` prefix (e.g.
   `db_run_read_only_query`, `db_list_tables`).
 - No `INSERT`/`UPDATE`/`DELETE`/DDL: writing is out of MVP scope.
+- `db/demo/seed.sql` is a **dev/test fixture** only: a realistic schema and
+  fake data to try the tools manually. The tools never assume it.
 
 ### Read-only query policy (MVP defaults)
 
@@ -255,6 +257,8 @@ pytest
 ```
 src/ja_pst_mcp/    # package
 tests/             # pytest tests
+db/demo/           # demo seed for the local demo stack (not used by tools)
+db/roles/          # least-privilege role reference script
 .github/workflows/ # CI
 pyproject.toml     # project + tooling config
 .env.example       # documented environment variables (committed)
