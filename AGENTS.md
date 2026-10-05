@@ -69,8 +69,8 @@ application authentication or `/api/...` endpoints — those belong to
 
 1. Read-only query foundation (limits config + `Database.fetch_rows`). **Done.**
 2. `db_run_read_only_query` (core analysis tool) and `db_health`. **Done.**
-3. Discovery tools (in progress): `db_list_schemas`, `db_list_tables` **done**;
-   next `db_describe_table`, constraints/relationships/indexes,
+3. Discovery tools (in progress): `db_list_schemas`, `db_list_tables`,
+   `db_describe_table` **done**; next constraints/relationships/indexes,
    `db_get_view_definition`.
 4. `db_preview_table`.
 

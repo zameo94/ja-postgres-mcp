@@ -39,6 +39,33 @@ class TableListOutput(BaseModel):
     truncated: bool
 
 
+class ColumnInfo(BaseModel):
+    """A column of a table or view."""
+
+    name: str
+    attnum: int
+    data_type: str
+    nullable: bool
+    default: str | None
+    is_primary_key: bool
+    comment: str | None
+
+
+class DescribeTableOutput(BaseModel):
+    """Result of ``db_describe_table``.
+
+    ``primary_key`` is ``None`` when the column list was truncated, because it
+    would otherwise look complete while derived from partial data.
+    """
+
+    schema_name: str
+    name: str
+    kind: TableKind
+    columns: list[ColumnInfo]
+    primary_key: list[str] | None
+    truncated: bool
+
+
 # System schemas (``pg_*`` and ``information_schema``) are excluded by default.
 _LIST_SCHEMAS_SQL = (
     "SELECT schema_name AS name, schema_owner AS owner "
@@ -115,3 +142,61 @@ def build_list_tables_query(
     if conditions:
         query += " AND " + " AND ".join(conditions)
     return query + " ORDER BY n.nspname, c.relname", (params or None)
+
+
+_RESOLVE_TABLE_SQL = (
+    "SELECT n.nspname AS schema_name, c.relname AS name, "
+    "CASE c.relkind "
+    "WHEN 'r' THEN 'table' WHEN 'p' THEN 'table' "
+    "WHEN 'v' THEN 'view' WHEN 'm' THEN 'matview' WHEN 'f' THEN 'foreign' "
+    "END AS kind "
+    "FROM pg_catalog.pg_class c "
+    "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') "
+    "AND n.nspname <> 'information_schema' "
+    "AND LEFT(n.nspname, 3) <> 'pg_'"
+)
+
+
+def build_resolve_table_query(
+    allowed_schemas: tuple[str, ...],
+    table: str,
+    schema: str | None = None,
+) -> tuple[str, list[object]]:
+    """Build the query resolving a table name to (schema, name, kind)."""
+    conditions = ["c.relname = %s"]
+    params: list[object] = [table]
+    if schema is not None:
+        conditions.append("n.nspname = %s")
+        params.append(schema)
+    if allowed_schemas:
+        conditions.append("n.nspname = ANY(%s)")
+        params.append(list(allowed_schemas))
+    query = _RESOLVE_TABLE_SQL + " AND " + " AND ".join(conditions)
+    return query + " ORDER BY n.nspname", params
+
+
+_DESCRIBE_COLUMNS_SQL = (
+    "SELECT a.attname AS name, a.attnum::int AS attnum, "
+    "pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type, "
+    "NOT a.attnotnull AS nullable, "
+    "pg_catalog.pg_get_expr(d.adbin, d.adrelid) AS default, "
+    "(a.attnum = ANY(COALESCE(pk.conkey, '{}'::int2[]))) AS is_primary_key, "
+    "pg_catalog.col_description(a.attrelid, a.attnum) AS comment "
+    "FROM pg_catalog.pg_attribute a "
+    "JOIN pg_catalog.pg_class c ON c.oid = a.attrelid "
+    "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+    "LEFT JOIN pg_catalog.pg_attrdef d "
+    "ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+    "LEFT JOIN pg_catalog.pg_constraint pk "
+    "ON pk.conrelid = a.attrelid AND pk.contype = 'p' "
+    "WHERE n.nspname = %s AND c.relname = %s "
+    "AND a.attnum > 0 AND NOT a.attisdropped"
+)
+
+
+def build_describe_columns_query(
+    schema: str, table: str
+) -> tuple[str, list[object]]:
+    """Build the query listing the columns of a resolved relation."""
+    return _DESCRIBE_COLUMNS_SQL + " ORDER BY a.attnum", [schema, table]
