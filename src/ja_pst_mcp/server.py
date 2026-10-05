@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Final
 
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -19,8 +20,8 @@ from ja_pst_mcp.context import AppContext
 from ja_pst_mcp.database import Database, DatabaseProtocol
 from ja_pst_mcp.tools import register_tools
 
-SERVER_NAME = "ja-pst-mcp"
-MCP_TRANSPORT = "streamable-http"
+SERVER_NAME: Final = "ja-pst-mcp"
+MCP_TRANSPORT: Final = "streamable-http"
 
 DatabaseFactory = Callable[[DatabaseSettings, QuerySettings], DatabaseProtocol]
 

@@ -20,6 +20,9 @@ from ja_pst_mcp.database import InvalidQueryError
 
 _CURSOR_VERSION = 1
 _SCOPE_DIGEST_SIZE = 8  # 64 bits -> 16 hex characters
+# A legitimate cursor is ~320 chars at most; this also keeps a hostile,
+# deeply-nested payload from reaching json.loads (RecursionError).
+_MAX_CURSOR_LENGTH = 512
 
 
 def cursor_scope(tool: str, filters: Mapping[str, object]) -> str:
@@ -29,12 +32,8 @@ def cursor_scope(tool: str, filters: Mapping[str, object]) -> str:
     keyset usage. The schema allowlist is excluded because it is stable for the
     process lifetime and cannot cause a mismatch.
     """
-    canonical = json.dumps(
-        {"tool": tool, **filters}, sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.blake2b(
-        canonical.encode("utf-8"), digest_size=_SCOPE_DIGEST_SIZE
-    ).hexdigest()
+    canonical = json.dumps({"tool": tool, **filters}, sort_keys=True, separators=(",", ":"))
+    return hashlib.blake2b(canonical.encode("utf-8"), digest_size=_SCOPE_DIGEST_SIZE).hexdigest()
 
 
 def encode_cursor(parts: Sequence[str], scope: str) -> str:
@@ -50,14 +49,17 @@ def decode_cursor(cursor: str, parts: int, scope: str) -> tuple[str, ...]:
     """Decode and validate a cursor for the given keyset and scope.
 
     Raises:
-        InvalidQueryError: if the cursor is malformed, its version is
+        InvalidQueryError: if the cursor is malformed, too long, its version is
             unsupported, or its scope does not match the current filters.
     """
+    if len(cursor) > _MAX_CURSOR_LENGTH:
+        raise InvalidQueryError("invalid pagination cursor")
+
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         raw = base64.urlsafe_b64decode(padded.encode("ascii"))
         data = json.loads(raw)
-    except Exception:
+    except ValueError:
         raise InvalidQueryError("invalid pagination cursor") from None
 
     if not isinstance(data, dict) or data.get("v") != _CURSOR_VERSION:

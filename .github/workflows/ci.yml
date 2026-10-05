@@ -21,6 +21,15 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Lint
+        run: uv run --no-sync ruff check .
+
+      - name: Format check
+        run: uv run --no-sync ruff format --check .
+
+      - name: Type check
+        run: uv run --no-sync mypy
+
       - name: Run tests (unit + integration)
         run: uv run --no-sync pytest
 
