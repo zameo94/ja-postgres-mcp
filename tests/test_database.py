@@ -14,7 +14,7 @@ import psycopg
 from psycopg import OperationalError
 
 from ja_pst_mcp import database as database_module
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings
+from ja_pst_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
 from ja_pst_mcp.database import (
     Database,
     DatabaseConnectionError,
@@ -40,6 +40,7 @@ class FakeCursor:
         self.description: list[SimpleNamespace] | None = None
         self.rows: list[tuple[Any, ...]] = []
         self.name: Any = None
+        self.fetch_sizes: list[int] = []
 
     async def __aenter__(self) -> "FakeCursor":
         return self
@@ -53,6 +54,7 @@ class FakeCursor:
         self.executed.append((query, params))
 
     async def fetchmany(self, size: int) -> list[tuple[Any, ...]]:
+        self.fetch_sizes.append(size)
         return self.rows[:size]
 
 
@@ -456,3 +458,31 @@ async def test_fetch_rows_keeps_other_sql_errors_generic(pool_spy: PoolSpy) -> N
         await database.fetch_rows("SELECT bad")
 
     assert not isinstance(excinfo.value, InvalidQueryError)
+
+
+async def test_fetch_rows_uses_per_call_max_rows(pool_spy: PoolSpy) -> None:
+    database = Database(SETTINGS, QuerySettings(max_rows=200))
+    assert pool_spy.pool is not None
+    connection = pool_spy.pool.connection_instance
+    connection.cursor_instance.description = [SimpleNamespace(name="n")]
+    connection.cursor_instance.rows = [(index,) for index in range(5)]
+
+    result = await database.fetch_rows("SELECT 1", max_rows=2)
+
+    assert connection.cursor_instance.fetch_sizes == [3]
+    assert result.row_count == 2
+    assert result.truncated is True
+
+
+async def test_fetch_rows_rejects_limit_above_hard_cap(pool_spy: PoolSpy) -> None:
+    database = Database(SETTINGS)
+
+    with pytest.raises(InvalidQueryError, match="row limit"):
+        await database.fetch_rows("SELECT 1", max_rows=HARD_MAX_ROWS + 1)
+
+
+async def test_fetch_rows_rejects_non_positive_max_rows(pool_spy: PoolSpy) -> None:
+    database = Database(SETTINGS)
+
+    with pytest.raises(InvalidQueryError, match="row limit"):
+        await database.fetch_rows("SELECT 1", max_rows=0)

@@ -17,10 +17,15 @@ class SchemaInfo(BaseModel):
 
 
 class SchemaListOutput(BaseModel):
-    """Result of ``db_list_schemas``."""
+    """A page of ``db_list_schemas`` results.
+
+    ``next_cursor`` is ``None`` on the last page; otherwise pass it back to get
+    the next page.
+    """
 
     schemas: list[SchemaInfo]
-    truncated: bool
+    next_cursor: str | None
+    row_count: int
 
 
 class TableInfo(BaseModel):
@@ -33,10 +38,11 @@ class TableInfo(BaseModel):
 
 
 class TableListOutput(BaseModel):
-    """Result of ``db_list_tables``."""
+    """A page of ``db_list_tables`` results."""
 
     tables: list[TableInfo]
-    truncated: bool
+    next_cursor: str | None
+    row_count: int
 
 
 class ColumnInfo(BaseModel):
@@ -52,18 +58,13 @@ class ColumnInfo(BaseModel):
 
 
 class DescribeTableOutput(BaseModel):
-    """Result of ``db_describe_table``.
-
-    ``primary_key`` is ``None`` when the column list was truncated, because it
-    would otherwise look complete while derived from partial data.
-    """
+    """Result of ``db_describe_table`` (one object, not paginated)."""
 
     schema_name: str
     name: str
     kind: TableKind
     columns: list[ColumnInfo]
-    primary_key: list[str] | None
-    truncated: bool
+    primary_key: list[str]
 
 
 # System schemas (``pg_*`` and ``information_schema``) are excluded by default.
@@ -77,18 +78,25 @@ _LIST_SCHEMAS_SQL = (
 
 def build_list_schemas_query(
     allowed_schemas: tuple[str, ...],
-) -> tuple[str, list[list[str]] | None]:
-    """Build the schema-listing SQL and its parameters (allowlist optional).
-
-    The allowlist is bound as a single PostgreSQL array parameter, hence the
-    nested ``[list(...)]`` (psycopg reads the outer sequence as parameters).
-    """
-    query = _LIST_SCHEMAS_SQL
-    params: list[list[str]] | None = None
+    page_size: int,
+    cursor: tuple[str, ...] | None = None,
+) -> tuple[str, list[object]]:
+    """Build one keyset page of schemas ordered by name."""
+    conditions: list[str] = []
+    params: list[object] = []
     if allowed_schemas:
-        query += " AND schema_name = ANY(%s)"
-        params = [list(allowed_schemas)]
-    return query + " ORDER BY schema_name", params
+        conditions.append("schema_name = ANY(%s)")
+        params.append(list(allowed_schemas))
+    if cursor is not None:
+        conditions.append("schema_name > %s")
+        params.append(cursor[0])
+
+    query = _LIST_SCHEMAS_SQL
+    if conditions:
+        query += " AND " + " AND ".join(conditions)
+    query += " ORDER BY schema_name LIMIT %s"
+    params.append(page_size + 1)
+    return query, params
 
 
 # relkind codes grouped by the public ``kind`` vocabulary.
@@ -118,14 +126,12 @@ _LIST_TABLES_SQL = (
 
 def build_list_tables_query(
     allowed_schemas: tuple[str, ...],
+    page_size: int,
     schema: str | None = None,
     kind: TableKind | None = None,
-) -> tuple[str, list[object] | None]:
-    """Build the table-listing SQL and its parameters (all filters optional).
-
-    Array filters are bound as single PostgreSQL array parameters, hence the
-    nested lists in ``params``.
-    """
+    cursor: tuple[str, ...] | None = None,
+) -> tuple[str, list[object]]:
+    """Build one keyset page of tables ordered by (schema, name)."""
     conditions: list[str] = []
     params: list[object] = []
     if allowed_schemas:
@@ -137,11 +143,16 @@ def build_list_tables_query(
     if kind is not None:
         conditions.append("c.relkind::text = ANY(%s)")
         params.append(list(_KIND_RELKINDS[kind]))
+    if cursor is not None:
+        conditions.append("(n.nspname, c.relname) > (%s, %s)")
+        params.extend([cursor[0], cursor[1]])
 
     query = _LIST_TABLES_SQL
     if conditions:
         query += " AND " + " AND ".join(conditions)
-    return query + " ORDER BY n.nspname, c.relname", (params or None)
+    query += " ORDER BY n.nspname, c.relname LIMIT %s"
+    params.append(page_size + 1)
+    return query, params
 
 
 _RESOLVE_TABLE_SQL = (

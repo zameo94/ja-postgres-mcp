@@ -12,6 +12,12 @@ _ENV_PREFIX = "JA_PST_"
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
+# Absolute cap enforced by the DB layer for any single ``fetch_rows`` call.
+HARD_MAX_ROWS = 10_000
+# Paginated discovery tools request ``page_size + 1`` rows (lookahead), so the
+# largest admissible page leaves room for that extra row.
+MAX_DISCOVERY_PAGE_SIZE = HARD_MAX_ROWS - 1
+
 _DEFAULT_DB_PORT = 5432
 _DEFAULT_DB_CONNECT_TIMEOUT_SECONDS = 10
 _DEFAULT_DB_POOL_MIN = 1
@@ -22,7 +28,9 @@ _DEFAULT_SERVER_PORT = 8000
 _DEFAULT_MAX_ROWS = 200
 _DEFAULT_STATEMENT_TIMEOUT_SECONDS = 5
 _DEFAULT_LOCK_TIMEOUT_SECONDS = 5
-_MAX_MAX_ROWS = 10000
+_DEFAULT_DISCOVERY_PAGE_SIZE = 200
+_DEFAULT_DISCOVERY_MAX_PAGE_SIZE = 1000
+_MAX_MAX_ROWS = HARD_MAX_ROWS
 _MAX_TIMEOUT_SECONDS = 300
 _DEFAULT_LOG_LEVEL: LogLevel = "INFO"
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
@@ -58,17 +66,20 @@ class ServerSettings:
 
 @dataclass(frozen=True, slots=True)
 class QuerySettings:
-    """Read-only analysis query policy.
+    """Read-only analysis and discovery policy.
 
-    ``allowed_schemas`` is consumed by the discovery tools (schema/table
-    listing); it is intentionally **not** applied to ``fetch_rows``, which runs
-    arbitrary read-only SQL. Empty means "all non-system schemas".
+    ``allowed_schemas`` and the discovery page sizes are consumed by the
+    discovery tools; they are intentionally **not** applied to ``fetch_rows``,
+    which runs arbitrary read-only SQL. Empty allowlist means "all non-system
+    schemas".
     """
 
     max_rows: int = _DEFAULT_MAX_ROWS
     statement_timeout_seconds: int = _DEFAULT_STATEMENT_TIMEOUT_SECONDS
     lock_timeout_seconds: int = _DEFAULT_LOCK_TIMEOUT_SECONDS
     allowed_schemas: tuple[str, ...] = ()
+    discovery_page_size: int = _DEFAULT_DISCOVERY_PAGE_SIZE
+    discovery_max_page_size: int = _DEFAULT_DISCOVERY_MAX_PAGE_SIZE
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +147,25 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     )
     _validate_server_settings(server)
 
+    discovery_page_size = _optional_int(
+        env,
+        "DISCOVERY_PAGE_SIZE",
+        default=_DEFAULT_DISCOVERY_PAGE_SIZE,
+        minimum=1,
+    )
+    discovery_max_page_size = _optional_int(
+        env,
+        "DISCOVERY_MAX_PAGE_SIZE",
+        default=_DEFAULT_DISCOVERY_MAX_PAGE_SIZE,
+        minimum=1,
+        maximum=MAX_DISCOVERY_PAGE_SIZE,
+    )
+    if discovery_max_page_size < discovery_page_size:
+        raise ConfigurationError(
+            f"{_ENV_PREFIX}DISCOVERY_MAX_PAGE_SIZE must be >= "
+            f"{_ENV_PREFIX}DISCOVERY_PAGE_SIZE"
+        )
+
     query = QuerySettings(
         max_rows=_optional_int(
             env, "MAX_ROWS", default=_DEFAULT_MAX_ROWS, minimum=1, maximum=_MAX_MAX_ROWS
@@ -155,6 +185,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             maximum=_MAX_TIMEOUT_SECONDS,
         ),
         allowed_schemas=_optional_list(env, "ALLOWED_SCHEMAS"),
+        discovery_page_size=discovery_page_size,
+        discovery_max_page_size=discovery_max_page_size,
     )
 
     return Settings(database=database, server=server, query=query, log_level=log_level)
