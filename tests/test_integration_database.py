@@ -425,7 +425,8 @@ async def test_db_list_schemas_tool_end_to_end(db_settings: DatabaseSettings) ->
     assert "public" in names
     assert "information_schema" not in names
     assert not any(name.startswith("pg_") for name in names)
-    assert result.structured_content["truncated"] is False
+    assert result.structured_content["next_cursor"] is None
+    assert result.structured_content["row_count"] == len(names)
 
 
 async def test_db_list_schemas_tool_with_allowlist(db_settings: DatabaseSettings) -> None:
@@ -441,6 +442,50 @@ async def test_db_list_schemas_tool_with_allowlist(db_settings: DatabaseSettings
 
     names = [schema["name"] for schema in result.structured_content["schemas"]]
     assert names == ["public"]
+
+
+async def test_db_list_schemas_traverses_pages(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    created_schemas = [f"ja_pst_page_{index}" for index in range(5)]
+    try:
+        for schema in created_schemas:
+            await connection.execute(f"CREATE SCHEMA {schema}")
+        await connection.commit()
+
+        settings = Settings(
+            database=db_settings,
+            server=ServerSettings(),
+            query=QuerySettings(discovery_page_size=2, discovery_max_page_size=10),
+        )
+        server = create_server(settings)
+
+        seen: list[str] = []
+        cursor: str | None = None
+        pages = 0
+        async with Client(server, raise_exceptions=True) as client:
+            while True:
+                arguments: dict[str, object] = {"page_size": 2}
+                if cursor is not None:
+                    arguments["cursor"] = cursor
+                result = await client.call_tool("db_list_schemas", arguments)
+                content = result.structured_content
+                assert len(content["schemas"]) <= 2
+                seen.extend(schema["name"] for schema in content["schemas"])
+                pages += 1
+                cursor = content["next_cursor"]
+                if cursor is None:
+                    break
+
+        assert pages >= 3
+        assert set(created_schemas).issubset(set(seen))
+        assert len(seen) == len(set(seen))
+    finally:
+        for schema in created_schemas:
+            await connection.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+        await connection.commit()
+        await connection.close()
 
 
 @pytest.fixture
@@ -506,7 +551,87 @@ async def test_db_list_tables_tool_end_to_end(
     assert all(
         table["schema_name"] == "public" and table["kind"] == "table" for table in tables
     )
-    assert result.structured_content["truncated"] is False
+    assert result.structured_content["next_cursor"] is None
+
+
+async def test_db_list_tables_traverses_pages(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    created_tables = [f"ja_pst_page_{index}" for index in range(5)]
+    try:
+        for table in created_tables:
+            await connection.execute(f"CREATE TABLE {table} (id int)")
+        await connection.commit()
+
+        settings = Settings(
+            database=db_settings,
+            server=ServerSettings(),
+            query=QuerySettings(discovery_page_size=2, discovery_max_page_size=10),
+        )
+        server = create_server(settings)
+
+        seen: list[str] = []
+        cursor: str | None = None
+        pages = 0
+        async with Client(server, raise_exceptions=True) as client:
+            while True:
+                arguments: dict[str, object] = {"schema": "public", "page_size": 2}
+                if cursor is not None:
+                    arguments["cursor"] = cursor
+                result = await client.call_tool("db_list_tables", arguments)
+                content = result.structured_content
+                assert len(content["tables"]) <= 2
+                seen.extend(table["name"] for table in content["tables"])
+                pages += 1
+                cursor = content["next_cursor"]
+                if cursor is None:
+                    break
+
+        assert pages >= 3
+        assert set(created_tables).issubset(set(seen))
+        assert len(seen) == len(set(seen))
+    finally:
+        for table in created_tables:
+            await connection.execute(f"DROP TABLE IF EXISTS {table}")
+        await connection.commit()
+        await connection.close()
+
+
+async def test_db_list_tables_rejects_cursor_from_other_scope(
+    db_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(db_settings)
+    try:
+        await connection.execute("CREATE TABLE ja_pst_scope_a (id int)")
+        await connection.execute("CREATE TABLE ja_pst_scope_b (id int)")
+        await connection.commit()
+
+        settings = Settings(
+            database=db_settings,
+            server=ServerSettings(),
+            query=QuerySettings(discovery_page_size=1, discovery_max_page_size=10),
+        )
+        server = create_server(settings)
+
+        async with Client(server, raise_exceptions=True) as client:
+            first = await client.call_tool(
+                "db_list_tables", {"schema": "public", "page_size": 1}
+            )
+            cursor = first.structured_content["next_cursor"]
+            assert cursor is not None
+            mismatch = await client.call_tool(
+                "db_list_tables",
+                {"schema": "information_schema", "page_size": 1, "cursor": cursor},
+            )
+
+        assert mismatch.is_error is True
+        assert "does not match" in mismatch.content[0].text
+    finally:
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_scope_a")
+        await connection.execute("DROP TABLE IF EXISTS ja_pst_scope_b")
+        await connection.commit()
+        await connection.close()
 
 
 async def test_db_list_tables_filters_by_kind(
@@ -556,7 +681,6 @@ async def test_db_describe_table_tool_end_to_end(
     assert id_column["data_type"] == "integer"
     assert id_column["nullable"] is False
     assert id_column["is_primary_key"] is True
-    assert content["truncated"] is False
 
 
 async def test_db_describe_table_resolves_schema(

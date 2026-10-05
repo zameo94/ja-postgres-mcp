@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from psycopg import AsyncConnection, Error as PsycopgError
 from psycopg_pool import AsyncConnectionPool
 
-from ja_pst_mcp.config import DatabaseSettings, QuerySettings
+from ja_pst_mcp.config import HARD_MAX_ROWS, DatabaseSettings, QuerySettings
 
 # Every pooled connection is read-only: the server is read-only by design.
 _READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
@@ -79,7 +79,11 @@ class DatabaseProtocol(Protocol):
     async def ping(self) -> None: ...
 
     async def fetch_rows(
-        self, query: str, params: QueryParams | None = None
+        self,
+        query: str,
+        params: QueryParams | None = None,
+        *,
+        max_rows: int | None = None,
     ) -> QueryResult: ...
 
 
@@ -152,20 +156,36 @@ class Database:
                 await cursor.execute("SELECT 1")
 
     async def fetch_rows(
-        self, query: str, params: QueryParams | None = None
+        self,
+        query: str,
+        params: QueryParams | None = None,
+        *,
+        max_rows: int | None = None,
     ) -> QueryResult:
-        """Run one read-only query, capped at ``max_rows`` rows.
+        """Run one read-only query with a bounded row cap.
 
-        The query runs through a **server-side cursor** (`DECLARE ... CURSOR`),
-        which uses the extended protocol and therefore makes multiple statements
-        structurally impossible, fetches rows in batches from the server (bounded
-        client memory) and reports columns even for an empty result set. The
-        transaction is READ ONLY (enforced at connection level) with statement
-        and lock timeouts set locally. At most ``max_rows`` rows are returned.
+        ``max_rows`` overrides the configured default (discovery tools pass their
+        page size + 1); a limit outside ``1..HARD_MAX_ROWS`` is an **error** — the
+        DB layer never silently reduces it. The query runs through a
+        **server-side cursor** (`DECLARE ... CURSOR`), which uses the extended
+        protocol and therefore makes multiple statements structurally impossible,
+        fetches rows in batches from the server (bounded client memory) and
+        reports columns even for an empty result set. The transaction is READ ONLY
+        (enforced at connection level) with statement and lock timeouts set
+        locally.
+
+        Discovery tools additionally put ``LIMIT page_size + 1`` in the SQL: the
+        SQL LIMIT bounds the server-side work and the portal, while
+        ``max_rows=page_size + 1`` bounds the client fetch used to detect whether
+        a next page exists. Both are needed and stay in sync.
         """
         if not query.strip():
             raise InvalidQueryError("empty query")
-        max_rows = self._query.max_rows
+        limit = self._query.max_rows if max_rows is None else max_rows
+        if limit < 1 or limit > HARD_MAX_ROWS:
+            raise InvalidQueryError(
+                f"row limit must be between 1 and {HARD_MAX_ROWS}"
+            )
 
         async with self.connection() as connection:
             async with connection.transaction():
@@ -185,7 +205,7 @@ class Database:
                             raise InvalidQueryError(
                                 "query did not return a result set"
                             )
-                        fetched = await cursor.fetchmany(max_rows + 1)
+                        fetched = await cursor.fetchmany(limit + 1)
                     except PsycopgError as exc:
                         if _is_multiple_statements(exc):
                             raise InvalidQueryError(
@@ -194,9 +214,9 @@ class Database:
                         raise
                     columns = tuple(column.name for column in cursor.description)
 
-        truncated = len(fetched) > max_rows
+        truncated = len(fetched) > limit
         rows = tuple(
-            tuple(_jsonify(value) for value in row) for row in fetched[:max_rows]
+            tuple(_jsonify(value) for value in row) for row in fetched[:limit]
         )
         return QueryResult(
             columns=columns,
