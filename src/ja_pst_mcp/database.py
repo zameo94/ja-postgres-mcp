@@ -40,6 +40,14 @@ class InvalidQueryError(DatabaseError):
     """The query is rejected by policy (empty query or without a result set)."""
 
 
+class TableNotFoundError(InvalidQueryError):
+    """The requested table does not exist or is not visible to the server."""
+
+
+class AmbiguousTableError(InvalidQueryError):
+    """The requested table name matches relations in more than one schema."""
+
+
 @dataclass(frozen=True, slots=True)
 class QueryResult:
     """Serializable result of a read-only query.

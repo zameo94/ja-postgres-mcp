@@ -13,19 +13,25 @@ from pydantic import BaseModel
 
 from ja_pst_mcp.context import AppContext
 from ja_pst_mcp.database import (
+    AmbiguousTableError,
     DatabaseConnectionError,
     DatabaseError,
     InvalidQueryError,
     QueryResult,
+    TableNotFoundError,
 )
 from ja_pst_mcp.discovery import (
+    ColumnInfo,
+    DescribeTableOutput,
     SchemaInfo,
     SchemaListOutput,
     TableInfo,
     TableKind,
     TableListOutput,
+    build_describe_columns_query,
     build_list_schemas_query,
     build_list_tables_query,
+    build_resolve_table_query,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +54,13 @@ _DB_LIST_TABLES_DESCRIPTION = (
     "List tables, views, materialized views and foreign tables, excluding system "
     "schemas (read-only). estimated_rows is planner statistics from the last "
     "ANALYZE: it can be stale and is null when the relation was never analyzed."
+)
+_DB_DESCRIBE_TABLE_DESCRIPTION = (
+    "Describe a table or view: columns (type, nullability, default, comment, "
+    "primary-key flag), kind and primary key (read-only). attnum is PostgreSQL's "
+    "column number (gaps after dropped columns). Resolves the relation by name; "
+    "if the name exists in several schemas, specify schema. primary_key is null "
+    "when the column list was truncated."
 )
 
 
@@ -160,6 +173,88 @@ def _table_infos(result: QueryResult) -> list[TableInfo]:
     ]
 
 
+async def db_describe_table(
+    ctx: Context[AppContext],
+    table: str,
+    schema: str | None = None,
+) -> DescribeTableOutput:
+    """Describe a table or view (columns, types, nullability, defaults, PK)."""
+    context = ctx.request_context.lifespan_context
+    try:
+        if schema is not None:
+            _ensure_schema_allowed(schema, context.query.allowed_schemas)
+        resolve_query, resolve_params = build_resolve_table_query(
+            context.query.allowed_schemas, table, schema
+        )
+        resolved = await context.database.fetch_rows(resolve_query, resolve_params)
+        schema_name, name, kind = _resolved_relation(table, resolved)
+        columns_query, columns_params = build_describe_columns_query(schema_name, name)
+        columns_result = await context.database.fetch_rows(
+            columns_query, columns_params
+        )
+        if columns_result.row_count == 0:
+            raise TableNotFoundError(f"table {schema_name}.{name} not found")
+    except DatabaseError as exc:
+        raise _tool_error("db_describe_table", exc) from exc
+
+    columns = _column_infos(columns_result)
+    primary_key = (
+        None
+        if columns_result.truncated
+        else [column.name for column in columns if column.is_primary_key]
+    )
+    return DescribeTableOutput(
+        schema_name=schema_name,
+        name=name,
+        kind=kind,
+        columns=columns,
+        primary_key=primary_key,
+        truncated=columns_result.truncated,
+    )
+
+
+def _resolved_relation(table: str, result: QueryResult) -> tuple[str, str, str]:
+    if result.columns != ("schema_name", "name", "kind"):
+        raise RuntimeError("unexpected table resolution result shape")
+    if result.row_count == 0:
+        raise TableNotFoundError(f"table {table!r} not found")
+    if result.row_count > 1:
+        schemas = [row[0] for row in result.rows]
+        shown = ", ".join(schemas[:5])
+        if len(schemas) > 5:
+            shown += f" (+{len(schemas) - 5} more)"
+        raise AmbiguousTableError(
+            f"table {table!r} exists in multiple schemas: {shown}; specify schema"
+        )
+    row = result.rows[0]
+    return row[0], row[1], row[2]
+
+
+def _column_infos(result: QueryResult) -> list[ColumnInfo]:
+    if result.columns != (
+        "name",
+        "attnum",
+        "data_type",
+        "nullable",
+        "default",
+        "is_primary_key",
+        "comment",
+    ):
+        raise RuntimeError("unexpected column listing result shape")
+    return [
+        ColumnInfo(
+            name=row[0],
+            attnum=row[1],
+            data_type=row[2],
+            nullable=row[3],
+            default=row[4],
+            is_primary_key=row[5],
+            comment=row[6],
+        )
+        for row in result.rows
+    ]
+
+
 def register_tools(server: MCPServer[AppContext]) -> None:
     """Register every MCP tool on ``server``."""
     server.tool(
@@ -182,3 +277,8 @@ def register_tools(server: MCPServer[AppContext]) -> None:
         description=_DB_LIST_TABLES_DESCRIPTION,
         annotations=_READ_ONLY_ANNOTATIONS,
     )(db_list_tables)
+    server.tool(
+        title="Describe table",
+        description=_DB_DESCRIBE_TABLE_DESCRIPTION,
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )(db_describe_table)
