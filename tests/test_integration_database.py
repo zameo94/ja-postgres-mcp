@@ -473,8 +473,13 @@ async def limited_settings(db_settings: DatabaseSettings) -> AsyncIterator[Datab
         await connection.execute("DROP ROLE IF EXISTS ja_pst_limited")
         await connection.execute("CREATE SCHEMA ja_pst_sales")
         await connection.execute("CREATE SCHEMA ja_pst_hidden")
+        await connection.execute("CREATE TABLE ja_pst_sales.items (id int, label text)")
+        await connection.execute("INSERT INTO ja_pst_sales.items VALUES (1, 'a')")
         await connection.execute("CREATE ROLE ja_pst_limited LOGIN PASSWORD 'limited'")
         await connection.execute("GRANT USAGE ON SCHEMA ja_pst_sales TO ja_pst_limited")
+        await connection.execute(
+            "GRANT SELECT ON ALL TABLES IN SCHEMA ja_pst_sales TO ja_pst_limited"
+        )
         await connection.commit()
         yield DatabaseSettings(
             host=db_settings.host,
@@ -488,6 +493,40 @@ async def limited_settings(db_settings: DatabaseSettings) -> AsyncIterator[Datab
         await connection.execute("DROP SCHEMA IF EXISTS ja_pst_hidden CASCADE")
         await connection.execute("DROP ROLE IF EXISTS ja_pst_limited")
         await connection.commit()
+        await connection.close()
+
+
+async def test_least_privilege_role_can_read(
+    limited_settings: DatabaseSettings,
+) -> None:
+    connection = await _connect_writable(limited_settings)
+    try:
+        cursor = await connection.execute("SELECT id, label FROM ja_pst_sales.items")
+        assert await cursor.fetchall() == [(1, "a")]
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "INSERT INTO ja_pst_sales.items (id) VALUES (2)",
+        "UPDATE ja_pst_sales.items SET label = 'x'",
+        "DELETE FROM ja_pst_sales.items",
+        "CREATE TABLE ja_pst_sales.new_table (id int)",
+        "DROP TABLE ja_pst_sales.items",
+        "CREATE TABLE public.should_not_exist (id int)",
+    ],
+)
+async def test_least_privilege_role_cannot_write(
+    limited_settings: DatabaseSettings, statement: str
+) -> None:
+    connection = await _connect_writable(limited_settings)
+    try:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            await connection.execute(statement)
+        await connection.rollback()
+    finally:
         await connection.close()
 
 
