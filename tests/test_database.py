@@ -20,6 +20,7 @@ from ja_postgres_mcp.database import (
     DatabaseConnectionError,
     DatabaseError,
     InvalidQueryError,
+    QueryError,
     build_connection_kwargs,
 )
 
@@ -435,7 +436,7 @@ async def test_fetch_rows_translates_multiple_statements_error(
         await database.fetch_rows("SELECT 1; SELECT 2")
 
 
-async def test_fetch_rows_keeps_other_sql_errors_generic(pool_spy: PoolSpy) -> None:
+async def test_fetch_rows_surfaces_query_error_message(pool_spy: PoolSpy) -> None:
     database = Database(SETTINGS)
     assert pool_spy.pool is not None
     connection = pool_spy.pool.connection_instance
@@ -443,10 +444,8 @@ async def test_fetch_rows_keeps_other_sql_errors_generic(pool_spy: PoolSpy) -> N
         "syntax error at or near SELECT"
     )
 
-    with pytest.raises(DatabaseError) as excinfo:
+    with pytest.raises(QueryError, match="syntax error at or near SELECT"):
         await database.fetch_rows("SELECT bad")
-
-    assert not isinstance(excinfo.value, InvalidQueryError)
 
 
 async def test_fetch_rows_uses_per_call_max_rows(pool_spy: PoolSpy) -> None:

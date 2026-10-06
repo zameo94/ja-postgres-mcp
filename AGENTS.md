@@ -217,18 +217,22 @@ application authentication or `/api/...` endpoints — those belong to
 - Never use raw string concatenation for SQL; use parameterized queries.
 - Never expose arbitrary SQL execution as a tool without explicit approval.
 - Never return sensitive data to the MCP client (passwords, connection strings,
-  driver messages, stack traces, infrastructure details). Expected database
-  errors are wrapped and exposed as a generic, safe message.
+  stack traces, infrastructure details). Connection/pool errors are exposed as a
+  generic, safe message. **Query execution errors** (syntax, unknown
+  relation/column, ...) surface the PostgreSQL primary message so the model can
+  correct the query; that message never contains credentials.
 - Server logs stay diagnostic but sanitized: never log passwords, secrets,
   tokens or full DSNs. Expected database errors are logged (with cause) for
   debugging; unexpected errors keep their full traceback.
 
 ## Error handling
 
-- Expected database/pool errors are wrapped in `DatabaseError` /
+- Connection/pool errors are wrapped in `DatabaseError` /
   `DatabaseConnectionError` and mapped to a safe `ToolError` at the MCP tool
-  boundary. The original driver error is preserved as `__cause__` for server
-  logs, never for the client.
+  boundary. **Query execution errors** are raised as `QueryError` (an
+  `InvalidQueryError`) carrying the PostgreSQL primary message, and the tool
+  returns it so the model can self-correct. The original driver error is always
+  preserved as `__cause__` for server logs.
 - Unexpected application errors are not masked as database errors; the SDK
   logs their full traceback and the client receives only a generic message.
 

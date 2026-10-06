@@ -15,6 +15,7 @@ from ja_postgres_mcp.database import (
     DatabaseConnectionError,
     DatabaseError,
     InvalidQueryError,
+    QueryError,
     QueryResult,
 )
 from ja_postgres_mcp.discovery import (
@@ -237,6 +238,18 @@ async def test_db_run_read_only_query_maps_database_error(settings: Settings) ->
     text = result.content[0].text
     assert DATABASE_OPERATION_MESSAGE in text
     assert "statement timeout" not in text
+
+
+async def test_db_run_read_only_query_surfaces_query_error(settings: Settings) -> None:
+    created: dict[str, FakeDatabase] = {}
+    error = QueryError('column "foo" does not exist')
+    server = create_server(settings, database_factory=make_factory(created, query_error=error))
+
+    async with Client(server, raise_exceptions=True) as client:
+        result = await client.call_tool("db_run_read_only_query", {"sql": "SELECT foo"})
+
+    assert result.is_error is True
+    assert 'column "foo" does not exist' in result.content[0].text
 
 
 def test_build_list_schemas_query_uses_limit_without_allowlist() -> None:

@@ -49,6 +49,15 @@ class AmbiguousTableError(InvalidQueryError):
     """The requested table name matches relations in more than one schema."""
 
 
+class QueryError(InvalidQueryError):
+    """The query failed to execute (syntax error, unknown relation/column, ...).
+
+    Unlike other database failures, this carries the PostgreSQL error message so
+    the caller (and the model) can correct the query. The message is the
+    server-side primary message, which never contains credentials.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class QueryResult:
     """Serializable result of a read-only query.
@@ -99,6 +108,15 @@ def build_connection_kwargs(settings: DatabaseSettings) -> dict[str, Any]:
         "connect_timeout": settings.connect_timeout_seconds,
         "options": _READ_ONLY_OPTIONS,
     }
+
+
+def _query_error_message(exc: PsycopgError) -> str:
+    """Return the PostgreSQL primary message, safe to expose for self-correction."""
+    diag = getattr(exc, "diag", None)
+    primary = getattr(diag, "message_primary", None)
+    if isinstance(primary, str) and primary.strip():
+        return primary.strip()
+    return str(exc).strip() or "query failed"
 
 
 class Database:
@@ -200,7 +218,7 @@ class Database:
                     except PsycopgError as exc:
                         if _is_multiple_statements(exc):
                             raise InvalidQueryError("only a single statement is allowed") from exc
-                        raise
+                        raise QueryError(_query_error_message(exc)) from exc
                     columns = tuple(column.name for column in cursor.description)
 
         truncated = len(fetched) > limit
