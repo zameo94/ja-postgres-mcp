@@ -11,7 +11,8 @@ with **read-only** SQL.
 
 The **database is the domain**: tables, columns, constraints and data are
 discovered at runtime and never hardcoded. The server is consumed by the separate
-`ja-postgres-mcp-client` application over MCP.
+[`ja-postgres-mcp-client`](https://github.com/zameo94/ja-postgres-mcp-client)
+application over MCP.
 
 > **PostgreSQL 15 or newer.** The server targets PostgreSQL 15+; its SQL and
 > catalog queries are compatible with version 15 and later.
